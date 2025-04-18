@@ -1,4 +1,5 @@
 contextily
+ffmpeg-python
 gpxpy
 ipykernel
 matplotlib
