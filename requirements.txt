@@ -1,0 +1,8 @@
+contextily
+gpxpy
+ipykernel
+matplotlib
+numpy
+pandas
+pytest
+streamlit
