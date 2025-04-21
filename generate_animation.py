@@ -6,6 +6,7 @@ from matplotlib.lines import Line2D
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import streamlit as st
 import tempfile
 
 from providers import PROVIDERS
@@ -15,6 +16,7 @@ from util import get_distinct_colors
 def generate_animation(
         combined_df,
         *,
+        mode="track",
         duration=15,
         fps=24,
         start_time=None,
@@ -26,8 +28,8 @@ def generate_animation(
         add_terrain=True,
         map_style="USTopo",
         fig_width=8,
-        lat_buffer=0.125,
-        lon_buffer=0.125,
+        lat_padding=0.125,
+        lon_padding=0.125,
         lat_min=None,
         lat_max=None,
         lon_min=None,
@@ -45,7 +47,14 @@ def generate_animation(
     if end_time is None:
         end_time = combined_df["elapsed_seconds"].max()
 
-    track_names = combined_df["track_name"].unique()
+    track_names = []
+    if mode == "track":
+        track_names = combined_df["track_name"].unique()
+    elif mode == "file":
+        track_names = combined_df["file_name"].unique()
+    else:
+        st.error("Invalid mode specified. Use 'track' or 'file'.")
+        return None
 
     colors = get_distinct_colors(len(track_names))
     color_map = dict(zip(track_names, colors))
@@ -53,10 +62,10 @@ def generate_animation(
     track_lat_delta = combined_df["latitude"].max() - combined_df["latitude"].min()
     track_lon_delta = combined_df["longitude"].max() - combined_df["longitude"].min()
     
-    track_lat_min = combined_df["latitude"].min() - lat_buffer*track_lat_delta
-    track_lat_max = combined_df["latitude"].max() + lat_buffer*track_lat_delta
-    track_lon_min = combined_df["longitude"].min() - lon_buffer*track_lon_delta
-    track_lon_max = combined_df["longitude"].max() + lon_buffer*track_lon_delta
+    track_lat_min = combined_df["latitude"].min() - lat_padding*track_lat_delta
+    track_lat_max = combined_df["latitude"].max() + lat_padding*track_lat_delta
+    track_lon_min = combined_df["longitude"].min() - lon_padding*track_lon_delta
+    track_lon_max = combined_df["longitude"].max() + lon_padding*track_lon_delta
     
     # Use custom bounds if provided, otherwise use data bounds
     anim_lat_min = lat_min if lat_min is not None else track_lat_min
@@ -99,8 +108,8 @@ def generate_animation(
             print(f"Could not add terrain map: {e}. Continuing without terrain.")
     
     # Set up the title
-    if title != "":
-        ax.set_title(title, fontsize=14, fontweight="bold")
+    # if title != "":
+    #     ax.set_title(title, fontsize=14, fontweight="bold")
     
     # Add a timestamp text
     time_text = ax.text(0.02, 0.95, "", transform=ax.transAxes, fontsize=12, 
@@ -144,17 +153,22 @@ def generate_animation(
             time_text.set_text(f"Time: {time_str}")
         else:
             time_text.set_text("")
+
+        # ax.set_title(f"{animation_time_normalized}, {current_time_seconds}, {start_time}, {end_time}", fontsize=14, fontweight="bold")
         
         for track_name in track_names:
             # Get data for the current track
             track_data = combined_df[combined_df["track_name"] == track_name]
+
+            mask_start_time = track_data["elapsed_seconds"] >= start_time
+            track_data = track_data[mask_start_time]
             
             # Get data up to current time
             mask_current_time = track_data["elapsed_seconds"] <= current_time_seconds
             visible_data = track_data[mask_current_time]
             
             if not visible_data.empty:
-                # Show the trail for the last "trail_duration" seconds
+
                 if trail_duration < (end_time - start_time) and len(visible_data) >= 1:
                     min_visible_time = max(start_time, current_time_seconds - trail_duration)
                     trail_mask = visible_data["elapsed_seconds"] >= min_visible_time

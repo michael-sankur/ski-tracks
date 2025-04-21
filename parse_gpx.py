@@ -7,7 +7,7 @@ import streamlit as st
 import tempfile
 
 # Load GPX files into a DataFrame
-def load_gpx_files(uploaded_files) -> pd.DataFrame | None:
+def parse_gpx_files(uploaded_files) -> pd.DataFrame | None:
 
     """
     Load GPX files into a DataFrame.
@@ -34,14 +34,17 @@ def load_gpx_files(uploaded_files) -> pd.DataFrame | None:
             for track in gpx.tracks:
                 for segment in track.segments:
                     for point in segment.points:
-                        track_points.append((uploaded_file.name.replace(".gpx", ""), 
-                                            point.time, 
-                                            point.latitude, 
-                                            point.longitude, 
-                                            point.elevation))
-            
+                        track_points.append(
+                            (uploaded_file.name.replace(".gpx", ""),
+                            track.name,
+                            point.time,
+                            point.latitude,
+                            point.longitude,
+                            point.elevation)
+                        )
+
             if track_points:  # Only process if there are points
-                df = pd.DataFrame(track_points, columns=["track_name", "timestamp", "latitude", "longitude", "elevation"])
+                df = pd.DataFrame(track_points, columns=["file_name", "track_name", "timestamp", "latitude", "longitude", "elevation"])
                 df["timestamp"] = pd.to_datetime(df["timestamp"])
                 
                 # Handle timezone conversion safely

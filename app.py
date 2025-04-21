@@ -1,63 +1,58 @@
-import os
-import tempfile
-import gpxpy
-import pandas as pd
-import matplotlib.pyplot as plt
-import contextily as ctx
-import numpy as np
-import matplotlib.animation as animation
-import matplotlib.colors as mcolors
-import streamlit as st
-from matplotlib.lines import Line2D
-import base64
-from io import BytesIO
-import tempfile
+# GPX Track Visualizer App
 
-from load_gpx import load_gpx_files
+import base64
+import hashlib
+import json
+import numpy as np
+import pandas as pd
+import os
+import streamlit as st
+
+from parse_gpx import parse_gpx_files
 from providers import PROVIDERS
 from generate_map import generate_map
 from generate_animation import generate_animation
 
 
 # Initialize session state variables
-if 'combined_df' not in st.session_state:
+if "combined_df" not in st.session_state:
     st.session_state.combined_df = None
-if 'static_map_generated' not in st.session_state:
-    st.session_state.static_map_generated = False
-if 'animation_generated' not in st.session_state:
+if "stat_map_generated" not in st.session_state:
+    st.session_state.stat_map_generated = False
+if "animation_generated" not in st.session_state:
     st.session_state.animation_generated = False
-if 'animation_file' not in st.session_state:
+if "animation_file" not in st.session_state:
     st.session_state.animation_file = None
-if 'static_map_fig' not in st.session_state:
-    st.session_state.static_map_fig = None
-if 'animation_bytes' not in st.session_state:
+if "stat_map_fig" not in st.session_state:
+    st.session_state.stat_map_fig = None
+if "animation_bytes" not in st.session_state:
     st.session_state.animation_bytes = None
     
 # Add parameter tracking
-if 'static_params_hash' not in st.session_state:
-    st.session_state.static_params_hash = ""
-if 'anim_params_hash' not in st.session_state:
+if "stat_params_hash" not in st.session_state:
+    st.session_state.stat_params_hash = ""
+if "anim_params_hash" not in st.session_state:
     st.session_state.anim_params_hash = ""
-if 'current_static_params' not in st.session_state:
-    st.session_state.current_static_params = {}
-if 'current_anim_params' not in st.session_state:
-    st.session_state.current_anim_params = {}
+if "stat_current_params" not in st.session_state:
+    st.session_state.stat_current_params = {}
+if "anim_current_params" not in st.session_state:
+    st.session_state.anim_current_params = {}
     
 
 # Helper function to create a download link
-def get_binary_file_downloader_html(bin_file, file_label='File'):
-    with open(bin_file, 'rb') as f:
+def get_binary_file_downloader_html(bin_file, file_label="File"):
+    with open(bin_file, "rb") as f:
         data = f.read()
     bin_str = base64.b64encode(data).decode()
-    href = f'<a href="data:application/octet-stream;base64,{bin_str}" download="{os.path.basename(bin_file)}" class="btn btn-primary">Download {file_label}</a>'
+    href = f"""<a href="data:application/octet-stream;base64,{bin_str}" download="{os.path.basename(bin_file)}" class="btn btn-primary">Download {file_label}</a>"""
     return href
 
 
 # Callback when files are uploaded
 def on_files_uploaded():
-    st.session_state.static_map_generated = False
+    st.session_state.stat_map_generated = False
     st.session_state.animation_generated = False
-    st.session_state.static_map_fig = None
+    st.session_state.stat_map_fig = None
     st.session_state.animation_bytes = None
     if st.session_state.animation_file is not None:
         try:
@@ -69,8 +64,6 @@ def on_files_uploaded():
 
 # Streamlit app
 def main():
-    # st.set_page_config(page_title="GPX Track Visualizer", layout="wide")
-
     st.set_page_config(page_title="GPX Track Visualizer", layout="wide")
     
     left_col, middle_col, right_col = st.columns([1, 6, 1])
@@ -79,335 +72,495 @@ def main():
     
         st.title("GPX Track Visualizer")
         st.write("Upload GPX files to visualize tracks on a map and create animations")
-        
+
+        st.divider()
+
+        st.header("Upload GPX Files")
+        st.write("Upload one or more GPX files containing GPS tracks. The app will parse the files and create a visualization of the tracks on a map or create an animation of the tracks over time.")
+                
         # File uploader
-        uploaded_files = st.file_uploader("Upload GPX files", type=["gpx"], accept_multiple_files=True, 
-                                         on_change=on_files_uploaded)
-        
+        uploaded_files = st.file_uploader(
+            "Upload GPX files",
+            type=["gpx"],
+            accept_multiple_files=True, 
+            on_change=on_files_uploaded
+        )
+
         if uploaded_files:
-            # Only process GPX files if we haven't processed them already or if they changed
+            # Only process GPX files if we have not processed them already or if they changed
             if st.session_state.combined_df is None:
                 with st.spinner("Processing GPX files..."):
-                    combined_df = load_gpx_files(uploaded_files)
+                    combined_df = parse_gpx_files(uploaded_files)
                 st.session_state.combined_df = combined_df
             else:
                 combined_df = st.session_state.combined_df
             
-            if combined_df is not None and not combined_df.empty:
-                st.success(f"Loaded {len(uploaded_files)} GPX files with {len(combined_df)} total track points")
-
-                st.divider()
-                
-                st.subheader("Map Settings")
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    map_style = st.selectbox("Map Style", list(PROVIDERS.keys()), index=12, key="static_map_style")
-                    fig_width = float(st.text_input("Figure Width (inches):", value="12", key="static_fig_width"))
-                    show_start_end_points = st.checkbox("Show Start and End Points", value=True, key="static_show_start_end")
-                    show_legend = st.checkbox("Show Legend", value=False, key="static_show_legend")
-                    show_coordinates = st.checkbox("Show Coordinates", value=False, key="static_show_coordinates")
-
-                
-                with col2:
-                    lat_buffer = float(st.text_input("Latitude Buffer", value="0.125", key="static_lat_buffer"))
-                    lon_buffer = float(st.text_input("Longitude Buffer", value="0.125", key="static_lon_buffer"))
-                    custom_title = st.text_input("Custom Title", "", key="static_title")
-                
-                # Advanced settings
-                with st.expander("Advanced Map Settings", expanded=False):
-                    st.subheader("Custom Latitude and Longitude Bounds")
-                    use_custom_bounds = st.checkbox("Use Custom Bounds", value=False, key="static_custom_bounds")
+        if uploaded_files and combined_df is not None and not combined_df.empty:
+            st.success(f"Loaded and parsed GPX file(s)")
+            with st.expander("File and Track Information", expanded=False):
+                track_info = ""
+                for file_name in sorted(combined_df["file_name"].unique()):
+                    track_info += f"File: {file_name} - {len(combined_df[combined_df["file_name"] == file_name]["track_name"].unique())} track(s)\n"
+                    # track_info += "Tracks:\n"
+                    for track_name in sorted(combined_df[combined_df["file_name"] == file_name]["track_name"].unique()):
+                        track_points = len(combined_df[combined_df["track_name"] == track_name])
+                        track_info += f"  - {track_name} - {track_points} points\n"
+                    track_info += "\n"
                     
-                    if use_custom_bounds:
-                        lat_min_default = float(combined_df["latitude"].min())
-                        lat_max_default = float(combined_df["latitude"].max())
-                        lon_min_default = float(combined_df["longitude"].min())
-                        lon_max_default = float(combined_df["longitude"].max())
-                        
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            lat_min = st.number_input("Min Latitude", value=lat_min_default, format="%.6f", key="static_lat_min")
-                            lon_min = st.number_input("Min Longitude", value=lon_min_default, format="%.6f", key="static_lon_min")
-                        
-                        with col2:
-                            lat_max = st.number_input("Max Latitude", value=lat_max_default, format="%.6f", key="static_lat_max")
-                            lon_max = st.number_input("Max Longitude", value=lon_max_default, format="%.6f", key="static_lon_max")
-                    else:
-                        lat_min = None
-                        lat_max = None
-                        lon_min = None
-                        lon_max = None
-                
-                # Generate a hash of the current static map parameters
-                import hashlib
-                import json
-                
-                # Create a dictionary of all static map parameters
-                static_params = {
-                    "map_style": map_style,
-                    "fig_width": fig_width,
-                    "lat_buffer": lat_buffer,
-                    "lon_buffer": lon_buffer,
-                    "lat_min": lat_min if use_custom_bounds else None,
-                    "lat_max": lat_max if use_custom_bounds else None,
-                    "lon_min": lon_min if use_custom_bounds else None,
-                    "lon_max": lon_max if use_custom_bounds else None,
-                    "custom_title": custom_title,
-                    "show_start_end_points": show_start_end_points,
-                    "show_legend": show_legend,
-                    "use_custom_bounds": use_custom_bounds
-                }
-                
-                # Generate a hash of these parameters
-                static_params_str = json.dumps(static_params, sort_keys=True)
-                current_hash = hashlib.md5(static_params_str.encode()).hexdigest()
-                
-                # Check if parameters have changed since last generation
-                params_changed = current_hash != st.session_state.static_params_hash
-                
-                # Display a note if parameters have changed since last generation
-                if params_changed and st.session_state.static_map_generated:
-                    st.info("Map parameters have changed. Click 'Generate Static Map' to update the visualization.")
+                    st.text_area("", track_info, height=200, disabled=True)
+        
+        st.divider()
 
-                # Generate the preview map button
-                generate_map_clicked = st.button("Generate Static Map")
+        # Visualization mode selection
+        st.subheader("Visualization Mode")
+        vis_mode = st.radio(
+            label="Select Visualization Mode",
+            index=0,
+            options=["Visualize files", "Visualize tracks"],
+            key="visualization_mode",
+            captions=[
+                "Combine all tracks within each file into a single track. Select if you export one trip per file. If an trip is split into multiple tracks, they will be combined into a single track.",
+                "Keep each track in GPX files separate. Select if you export multiple trips per file. If a trip is split into multiple tracks, they will be NOT combined into a single track, and be treated as multiple trips."
+            ]
+        )
+        vis_mode = "file" if vis_mode == "Visualize files" else "track"
+
+        # Create an expandable container for the file/track information
+        if uploaded_files and combined_df is not None and not combined_df.empty:        
+            with st.expander("File and Track Information", expanded=False):
+                if vis_mode == "file":
+                    file_info = ""
+                    for file_name in sorted(combined_df["file_name"].unique()):
+                        file_info += f"File {file_name}.gpx combined into a track of {len(combined_df[combined_df["file_name"] == file_name])} points\n"
+
+                    st.text_area("", file_info, height=200, disabled=True)
                 
-                # Always show the map if it was previously generated
-                if generate_map_clicked or st.session_state.static_map_generated:
-                    # Regenerate the map only if button was clicked or it's the first time
-                    if generate_map_clicked or st.session_state.static_map_fig is None:
-                        with st.spinner("Generating map..."):
-                            fig = generate_map(
+                elif vis_mode == "track":
+                    track_info = ""
+                    for file_name in sorted(combined_df["file_name"].unique()):
+                        # track_info += f"File: {file_name} - {len(combined_df[combined_df["file_name"] == file_name]["track_name"].unique())} track(s)\n"
+                        # track_info += "Tracks:\n"
+                        for track_name in sorted(combined_df[combined_df["file_name"] == file_name]["track_name"].unique()):
+                            track_points = len(combined_df[combined_df["track_name"] == track_name])
+                            track_info += f"  - {track_name} - {track_points} points\n"
+                        track_info += "\n"
+                    
+                    # Display in a text area which is scrollable by default
+                    st.text_area("", track_info, height=200, disabled=True)
+
+        st.divider()
+
+        # Static Map Visualization
+        st.header("Generate Static Visualization")
+
+        # stat_title = st.text_input("Title", "", key="stat_title")
+        stat_map_settings_column, stat_vis_settings_column = st.columns(2)
+        
+        with stat_map_settings_column:
+            st.subheader("Map Settings")
+            stat_fig_width = st.number_input("Figure Width (inches):", min_value=6.0, max_value=18.0, value=12.0, step=0.5, format="%.1f", key="stat_fig_width")
+            stat_map_style = st.selectbox("Map Style", list(PROVIDERS.keys()), index=12, key="stat_map_style")            
+            stat_lat_padding = st.number_input("Latitude Padding", min_value=0.0, max_value=1.0, value=0.125, step=0.005, format="%.3f",key="stat_lat_padding")
+            stat_lon_padding = st.number_input("Longitude Padding", min_value=0.0, max_value=1.0, value=0.125, step=0.005, format="%.3f",key="stat_lon_padding")
+
+            
+
+            # Custom map bounds
+            stat_use_custom_bounds = False
+            with st.expander("Custom Latitude and Longitude Bounds", expanded=False):
+                if uploaded_files and combined_df is not None and not combined_df.empty:
+                    stat_use_custom_bounds = st.checkbox("Use Custom Bounds", value=False, key="stat_custom_bounds")
+
+                    stat_track_lat_delta = combined_df["latitude"].max() - combined_df["latitude"].min()
+                    stat_track_lon_delta = combined_df["longitude"].max() - combined_df["longitude"].min()
+
+                    stat_lat_min_default = combined_df["latitude"].min() - stat_lat_padding*stat_track_lat_delta
+                    stat_lat_max_default = combined_df["latitude"].max() + stat_lat_padding*stat_track_lat_delta
+                    stat_lon_min_default = combined_df["longitude"].min() - stat_lon_padding*stat_track_lon_delta
+                    stat_lon_max_default = combined_df["longitude"].max() + stat_lon_padding*stat_track_lon_delta
+                    
+                    if stat_use_custom_bounds:                        
+                        stat_lat_min = st.number_input("Min Latitude", value=stat_lat_min_default, format="%.4f", step=0.005, key="stat_lat_min")
+                        stat_lat_max = st.number_input("Max Latitude", value=stat_lat_max_default, format="%.4f", step=0.005, key="stat_lat_max")
+                        stat_lon_min = st.number_input("Min Longitude", value=stat_lon_min_default, format="%.4f", step=0.005, key="stat_lon_min")                        
+                        stat_lon_max = st.number_input("Max Longitude", value=stat_lon_max_default, format="%.4f", step=0.005, key="stat_lon_max")
+                    else:
+                        stat_lat_min = stat_lat_min_default
+                        stat_lat_max = stat_lat_max_default
+                        stat_lon_min = stat_lon_min_default
+                        stat_lon_max = stat_lon_max_default
+        
+        with stat_vis_settings_column:
+            st.subheader("Visualization Options")
+            stat_show_start_end_points = st.checkbox("Show start and end points", value=True, key="stat_show_start_end")
+            stat_show_legend = st.checkbox("Show legend", value=False, key="stat_show_legend")
+            stat_show_coordinates = st.checkbox("Show coordinates", value=False, key="stat_show_coordinates")
+
+            stat_line_width = st.slider("Line Width", min_value=1, max_value=4, value=2, step=1, key="stat_line_width")
+            stat_marker_size = st.slider("Marker Size", min_value=1, max_value=8, value=4, step=1, key="stat_marker_size")
+
+            stat_start_seconds = 0
+            stat_end_seconds = 24 * 3600
+
+            with st.expander("Custom Time Range", expanded=False):
+                
+                if uploaded_files and combined_df is not None and not combined_df.empty:
+                    st.write(f"Data time range: {combined_df["time"].min()[0:-3]} to {combined_df["time"].max()[0:-3]}")
+
+                    stat_min_time = combined_df["elapsed_seconds"].min()
+                    stat_min_time_rounded = stat_min_time - (stat_min_time % (30*60))
+                    stat_max_time = combined_df["elapsed_seconds"].max()
+                    stat_max_time_rounded = stat_max_time - (stat_max_time % (30*60)) + 30*60
+
+                    stat_time_options = []
+                    for hour in range(25):
+                        for minute in [0, 15, 30, 45]:
+                            if hour == 24 and minute > 0:
+                                continue
+                            stat_time_options.append(f"{hour:02d}:{minute:02d}")
+
+                    # Default to nearest 30-minute intervals
+                    stat_default_start_idx = int(2*np.floor(stat_min_time_rounded / (30*60)))
+                    stat_default_end_idx = int(2*np.ceil(stat_max_time_rounded / (30*60)))
+
+
+                    # Create a range slider using the select_slider
+                    stat_selected_range = st.select_slider(
+                        "Time range",
+                        options=stat_time_options,
+                        value=(stat_time_options[stat_default_start_idx], stat_time_options[stat_default_end_idx]),
+                        key="stat_time_range"
+                    )
+
+                    stat_start_time, stat_end_time = stat_selected_range
+
+                    stat_start_hour, stat_start_minute = map(int, stat_start_time.split(":"))
+                    stat_end_hour, stat_end_minute = map(int, stat_end_time.split(":"))
+
+                    stat_start_seconds = 3600 * stat_start_hour + 60 * stat_start_minute
+                    stat_end_seconds = 3600 * stat_end_hour + 60 * stat_end_minute
+                else:
+                    stat_time_options = []
+                    for hour in range(25):
+                        for minute in [0, 15, 30, 45]:
+                            if hour == 24 and minute > 0:
+                                continue
+                            stat_time_options.append(f"{hour:02d}:{minute:02d}")
+                    stat_selected_range = st.select_slider(
+                            "Time range",
+                            options=stat_time_options,
+                            value=(stat_time_options[0], stat_time_options[-1]),
+                            key="stat_time_range"
+                        )
+        col1, col2, col3 = st.columns([1, 4, 1])
+        with col2:
+            stat_title = st.text_input("Title", "", key="stat_title")
+        
+            # Create a dictionary of all static map parameters
+            stat_params = {
+                "vis_mode": vis_mode,
+                "map_style": stat_map_style,
+                "fig_width": stat_fig_width,
+                "lat_padding": stat_lat_padding,
+                "lon_padding": stat_lon_padding,
+                "use_custom_bounds": stat_use_custom_bounds,
+                "lat_min": stat_lat_min if stat_use_custom_bounds else None,
+                "lat_max": stat_lat_max if stat_use_custom_bounds else None,
+                "lon_min": stat_lon_min if stat_use_custom_bounds else None,
+                "lon_max": stat_lon_max if stat_use_custom_bounds else None,            
+                "show_start_end_points": stat_show_start_end_points,
+                "show_legend": stat_show_legend,            
+                "show_coordinates": stat_show_coordinates,
+                "line_width": stat_line_width,
+                "marker_size": stat_marker_size,
+                "custom_title": stat_title,
+                "start_seconds": stat_start_seconds,
+                "end_seconds": stat_end_seconds,
+            }
+            
+            # Generate a hash of these parameters
+            stat_params_str = json.dumps(stat_params, sort_keys=True)
+            stat_current_hash = hashlib.md5(stat_params_str.encode()).hexdigest()
+            
+            # Check if parameters have changed since last generation
+            stat_params_changed = stat_current_hash != st.session_state.stat_params_hash
+            
+            # Display a note if parameters have changed since last generation
+            if stat_params_changed and st.session_state.stat_map_generated:
+                st.info("Map parameters have changed. Click Generate Static Map to update the visualization.")
+
+            stat_generate_clicked = st.button("Generate Static Map", disabled=not(uploaded_files and combined_df is not None and not combined_df.empty))
+            
+            # Always show the map if it was previously generated
+            if stat_generate_clicked or st.session_state.stat_map_generated:
+                # Regenerate the map only if button was clicked or it is the first time
+                if stat_generate_clicked or st.session_state.stat_map_fig is None:
+                    with st.spinner("Generating map..."):
+                        fig = generate_map(
+                            combined_df,
+                            mode=vis_mode,
+                            map_style=stat_map_style,
+                            fig_width=int(stat_fig_width),
+                            lat_padding=stat_lat_padding,
+                            lon_padding=stat_lon_padding,
+                            lat_min=stat_lat_min,
+                            lat_max=stat_lat_max,
+                            lon_min=stat_lon_min,
+                            lon_max=stat_lon_max,                            
+                            show_start_end_points=stat_show_start_end_points,
+                            show_legend=stat_show_legend,
+                            show_coordinates=stat_show_coordinates,
+                            line_width=stat_line_width,
+                            start_end_marker_size=stat_marker_size,
+                            title=stat_title,
+                            start_time=stat_start_seconds,
+                            end_time=stat_end_seconds
+                        )
+                        st.session_state.stat_map_fig = fig
+                        st.session_state.stat_map_generated = True
+                        # Update the hash
+                        st.session_state.stat_params_hash = stat_current_hash
+                        # Record the current parameters so we know we are showing the latest
+                        st.session_state.current_stat_params = stat_params
+                
+                # Display the map outside the regeneration condition
+                # This ensures it's always shown if it exists
+                if st.session_state.stat_map_fig:
+                    # col1, col2, col3 = st.columns([1, 4, 1])
+                    # with col2:
+                    st.pyplot(st.session_state.stat_map_fig)
+
+        st.divider()
+
+        st.header("Generate an Animation")
+        st.write("Create an animated visualization of the GPX tracks over time. You can customize the animation settings such as duration, FPS, and map style.")
+        
+        # anim_title = st.text_input("Animation title", "", key="anim_title")
+        anim_col_01, anim_col_02, anim_col_03 = st.columns(3)
+        
+        with anim_col_01:
+            st.subheader("Map Settings")
+            anim_fig_width = st.number_input("Animation width (inches):", min_value=6.0, max_value=18.0, value=12.0, step=0.5, format="%.1f", key="anim_fig_width")
+            anim_map_style = st.selectbox("Map Style", list(PROVIDERS.keys()), index=12, key="anim_map_style")
+            anim_lat_padding = st.number_input("Latitude Padding", min_value=0.0, max_value=1.0, value=0.125, step=0.005, format="%.3f",key="anim_lat_padding")
+            anim_lon_padding = st.number_input("Longitude Padding", min_value=0.0, max_value=1.0, value=0.125, step=0.005, format="%.3f", key="anim_lon_padding")
+
+            # Custom map bounds
+            anim_use_custom_bounds = False
+            with st.expander("Custom Latitude and Longitude Bounds", expanded=False):
+                if uploaded_files and combined_df is not None and not combined_df.empty:
+                    anim_use_custom_bounds = st.checkbox("Use custom Bounds", value=False, key="anim_custom_bounds")
+
+                    anim_track_lat_delta = combined_df["latitude"].max() - combined_df["latitude"].min()
+                    anim_track_lon_delta = combined_df["longitude"].max() - combined_df["longitude"].min()
+
+                    anim_lat_min_default = combined_df["latitude"].min() - anim_lat_padding*anim_track_lat_delta
+                    anim_lat_max_default = combined_df["latitude"].max() + anim_lat_padding*anim_track_lat_delta
+                    anim_lon_min_default = combined_df["longitude"].min() - anim_lon_padding*anim_track_lon_delta
+                    anim_lon_max_default = combined_df["longitude"].max() + anim_lon_padding*anim_track_lon_delta
+                    
+                    if anim_use_custom_bounds:                        
+                        anim_lat_min = st.number_input("Min Latitude", value=anim_lat_min_default, format="%.6f", key="anim_lat_min")
+                        anim_lat_max = st.number_input("Max Latitude", value=anim_lat_max_default, format="%.6f", key="anim_lat_max")
+                        anim_lon_min = st.number_input("Min Longitude", value=anim_lon_min_default, format="%.6f", key="anim_lon_min")                        
+                        anim_lon_max = st.number_input("Max Longitude", value=anim_lon_max_default, format="%.6f", key="anim_lon_max")
+                    else:
+                        anim_lat_min = anim_lat_min_default
+                        anim_lat_max = anim_lat_max_default
+                        anim_lon_min = anim_lon_min_default
+                        anim_lon_max = anim_lon_max_default
+
+        with anim_col_02:
+            st.subheader("Data Settings")
+
+            anim_show_time = st.checkbox("Show time", value=True, key="anim_show_time")
+            anim_show_legend = st.checkbox("Show legend", value=False, key="anim_show_legend")            
+            anim_show_start_end_points = st.checkbox("Show start and end points", value=False, key="anim_show_start_end")
+            anim_show_coordinates = st.checkbox("Show coordinates", value=False, key="anim_show_coordinates")
+            anim_line_width = st.slider("Line Width", min_value=1, max_value=4, value=2, step=1, key="anim_line_width")
+            anim_marker_size = st.slider("Marker Size", min_value=1, max_value=8, value=4, step=1, key="anim_marker_size")
+
+            anim_start_seconds = 0
+            anim_end_seconds = 24 * 3600
+
+            with st.expander("Custom Time Range", expanded=False):
+                
+                if uploaded_files and combined_df is not None and not combined_df.empty:
+                    st.write(f"Data time range: {combined_df["time"].min()[0:-3]} to {combined_df["time"].max()[0:-3]}")
+
+                    anim_min_time = combined_df["elapsed_seconds"].min()
+                    anim_min_time_rounded = anim_min_time - (anim_min_time % (30*60))
+                    anim_max_time = combined_df["elapsed_seconds"].max()
+                    anim_max_time_rounded = anim_max_time - (anim_max_time % (30*60)) + 30*60
+
+                    anim_time_options = []
+                    for hour in range(25):
+                        for minute in [0, 15, 30, 45]:
+                            if hour == 24 and minute > 0:
+                                continue
+                            anim_time_options.append(f"{hour:02d}:{minute:02d}")
+
+                    # Default to nearest 15-minute intervals
+                    anim_default_start_idx = int(2*np.floor(anim_min_time_rounded / (30*60)))
+                    anim_default_end_idx = int(2*np.ceil(anim_max_time_rounded / (30*60)))
+
+                    # Create a range slider using the select_slider
+                    anim_selected_range = st.select_slider(
+                        "Animation time range",
+                        options=anim_time_options,
+                        value=(anim_time_options[anim_default_start_idx], anim_time_options[anim_default_end_idx]),
+                        key="anim_time_range"
+                    )
+
+                    # You can then convert these back to decimal hours if needed for calculations
+                    anim_start_time, anim_end_time = anim_selected_range
+
+                    anim_start_hour, anim_start_minute = map(int, anim_start_time.split(":"))
+                    anim_end_hour, anim_end_minute = map(int, anim_end_time.split(":"))
+
+                    anim_start_seconds = 3600 * anim_start_hour + 60 * anim_start_minute
+                    anim_end_seconds = 3600 * anim_end_hour + 60 * anim_end_minute
+
+                else:
+                    anim_time_options = []
+                    for hour in range(25):
+                        for minute in [0, 15, 30, 45]:
+                            if hour == 24 and minute > 0:
+                                continue
+                            anim_time_options.append(f"{hour:02d}:{minute:02d}")
+                    anim_selected_range = st.select_slider(
+                            "Time range",
+                            options=anim_time_options,
+                            value=(anim_time_options[0], anim_time_options[-1]),
+                            key="anim_time_range"
+                        )
+        
+        with anim_col_03:
+            st.subheader("Animation Settings")
+
+            anim_duration = st.slider("Animation length (seconds)", min_value=10, max_value=60, value=20, step=2, key="anim_duration")
+            anim_fps = st.slider("Frames per second", min_value=10, max_value=48, value=24, step=2, key="anim_fps")            
+            anim_trail_duration = 60*60*st.slider(
+                "Trail duration (hours)",
+                min_value=0,
+                max_value=24,
+                value=12,
+                step=1,
+                key="anim_trail_hours"
+            )                    
+            anim_dpi = st.slider("Resolution (DPI)", min_value=100, max_value=300, value=150, step=25, key="anim_dpi")
+            
+        col1, col2, col3 = st.columns([1, 4, 1])
+        with col2:
+
+            anim_title = st.text_input("Title", "", key="anim_title")
+            
+            # Create a dictionary of all animation parameters
+            anim_params = {
+                "map_style": anim_map_style,
+                "fig_width": anim_fig_width,
+                "duration": anim_duration,
+                "fps": anim_fps,
+                "marker_size": anim_marker_size,
+                "line_width": anim_line_width,
+                "lat_padding": anim_lat_padding,
+                "lon_padding": anim_lon_padding,
+                "title": anim_title,
+                "show_time": anim_show_time,
+                "show_legend": anim_show_legend,
+                "trail_duration": anim_trail_duration,
+                "use_custom_bounds": anim_use_custom_bounds,
+                "lat_min": anim_lat_min if anim_use_custom_bounds else None,
+                "lat_max": anim_lat_max if anim_use_custom_bounds else None,
+                "lon_min": anim_lon_min if anim_use_custom_bounds else None,
+                "lon_max": anim_lon_max if anim_use_custom_bounds else None,
+                "start_time": anim_start_seconds,
+                "end_time": anim_end_seconds,
+                "dpi": anim_dpi
+            }
+            
+            # Generate a hash of these parameters
+            anim_params_str = json.dumps(anim_params, sort_keys=True)
+            anim_current_hash = hashlib.md5(anim_params_str.encode()).hexdigest()
+            
+            # Check if parameters have changed since last generation
+            anim_params_changed = anim_current_hash != st.session_state.anim_params_hash
+            
+            # Display a note if parameters have changed since last generation
+            if anim_params_changed and st.session_state.animation_generated:
+                st.info("Animation parameters have changed. Click Generate Animation to update the visualization.")
+
+            # if uploaded_files and combined_df is not None and not combined_df.empty:
+            
+            # Generate animation button
+            anim_gen_clicked = st.button("Generate Animation", disabled=not(uploaded_files and combined_df is not None and not combined_df.empty))
+            
+            # Display the animation if button clicked or if it was previously generated
+            if anim_gen_clicked or st.session_state.animation_generated:
+                # Regenerate only if button was explicitly clicked or if first time
+                anim_needs_regeneration = (anim_gen_clicked or st.session_state.animation_bytes is None)
+                
+                # Generate the animation if needed
+                if anim_needs_regeneration:
+                    with st.spinner("Generating animation... This may take a while depending on duration and quality settings."):
+                        try:
+                            animation_file = generate_animation(
                                 combined_df,
-                                map_style=map_style,
-                                fig_width=int(fig_width),
-                                lat_buffer=lat_buffer,
-                                lon_buffer=lon_buffer,
-                                lat_min=lat_min,
-                                lat_max=lat_max,
-                                lon_min=lon_min,
-                                lon_max=lon_max,
-                                title=custom_title,
-                                start_end_points=show_start_end_points,
-                                show_legend=show_legend
+                                duration=anim_duration,
+                                fps=anim_fps,
+                                start_time=anim_start_seconds,
+                                end_time=anim_end_seconds,
+                                dpi=anim_dpi,
+                                trail_duration=anim_trail_duration,
+                                marker_size=anim_marker_size,
+                                line_width=anim_line_width,
+                                add_terrain=True,
+                                map_style=anim_map_style,
+                                fig_width=int(anim_fig_width),
+                                lat_padding=anim_lat_padding,
+                                lon_padding=anim_lon_padding,
+                                lat_min=anim_lat_min,
+                                lat_max=anim_lat_max,
+                                lon_min=anim_lon_min,
+                                lon_max=anim_lon_max,
+                                title=anim_title,
+                                show_time=anim_show_time,
+                                show_legend=anim_show_legend
                             )
-                            st.session_state.static_map_fig = fig
-                            st.session_state.static_map_generated = True
-                            # Update the hash
-                            st.session_state.static_params_hash = current_hash
-                            # Record the current parameters so we know we're showing the latest
-                            st.session_state.current_static_params = static_params
-                    
-                    col1, col2, col3 = st.columns([1, 4, 1])
-                    with col2:
-                        if st.session_state.static_map_fig:
-                            st.pyplot(st.session_state.static_map_fig)
-
-                st.divider()
-
-                st.subheader("Animation Settings")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    anim_map_style = st.selectbox("Map Style", list(PROVIDERS.keys()), index=12, key="anim_map_style")
-                    anim_fig_width = float(st.text_input("Figure Width (inches):", value="8", key="anim_fig_width"))
-                    anim_duration = st.slider("Animation Duration (seconds)", min_value=5, max_value=60, value=20, step=1, key="anim_duration")
-                    anim_fps = st.slider("Frames Per Second", min_value=10, max_value=48, value=24, step=2, key="anim_fps")
-                    marker_size = st.slider("Marker Size", min_value=1, max_value=4, value=2, step=1, key="marker_size")
-                    line_width = st.slider("Line Width", min_value=1, max_value=4, value=1, step=1, key="line_width")
-                
-                with col2:
-                    anim_lat_buffer = float(st.text_input("Latitude Buffer", value="0.125", key="anim_lat_buffer"))
-                    anim_lon_buffer = float(st.text_input("Longitude Buffer", value="0.125", key="anim_lon_buffer"))
-                    anim_title = st.text_input("Animation Title", "", key="anim_title")
-                    show_time = st.checkbox("Show Time", value=True, key="show_time")
-                    show_legend = st.checkbox("Show Legend", value=False, key="show_legend")
-                    trail_duration = 60*60*st.slider("Trail Duration (hours) - set to 0 to disable disappering trails",
-                                                    min_value=0, max_value=24, value=12, step=1, key="trail_minutes")
-                
-                # trail_duration = trail_minutes * 60  # Convert minutes to seconds
-                if trail_duration == 0:
-                    trail_duration = 24*3600
-                
-                # Advanced settings
-                with st.expander("Advanced Animation Settings", expanded=False):
-                    st.subheader("Custom Latitude and Longitude Bounds")
-                    anim_use_custom_bounds = st.checkbox("Use Custom Bounds", value=False, key="anim_custom_bounds")
-                    
-                    if anim_use_custom_bounds:
-                        anim_lat_min_default = float(combined_df["latitude"].min())
-                        anim_lat_max_default = float(combined_df["latitude"].max())
-                        anim_lon_min_default = float(combined_df["longitude"].min())
-                        anim_lon_max_default = float(combined_df["longitude"].max())
-                        
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            anim_lat_min = st.number_input("Min Latitude", value=anim_lat_min_default, format="%.6f", key="anim_lat_min")
-                            anim_lon_min = st.number_input("Min Longitude", value=anim_lon_min_default, format="%.6f", key="anim_lon_min")
-                        
-                        with col2:
-                            anim_lat_max = st.number_input("Max Latitude", value=anim_lat_max_default, format="%.6f", key="anim_lat_max")
-                            anim_lon_max = st.number_input("Max Longitude", value=anim_lon_max_default, format="%.6f", key="anim_lon_max")
-                    else:
-                        anim_lat_min = None
-                        anim_lat_max = None
-                        anim_lon_min = None
-                        anim_lon_max = None
-                    
-                    st.subheader("Time Range")
-                    # Get actual time range in the data
-                    min_time = combined_df["elapsed_seconds"].min()
-                    min_time = min_time - (min_time % (30*60))  # Round down to nearest minute
-                    max_time = combined_df["elapsed_seconds"].max()
-                    max_time = max_time - (max_time % (30*60)) + 30*60
-                    
-                    # Convert to hours:minutes for display
-                    min_time_str = pd.to_datetime(min_time, unit='s').strftime('%H:%M')
-                    max_time_str = pd.to_datetime(max_time, unit='s').strftime('%H:%M')
-                    
-                    st.write(f"Data time range: {min_time_str} to {max_time_str}")
-                    custom_time_range = st.checkbox("Use Custom Time Range", value=False, key="custom_time_range")
-                    
-                    if custom_time_range:
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            start_hour = st.slider("Start Hour", min_value=0, max_value=23, 
-                                                value=int(min_time/3600), step=1, key="start_hour")
-                            start_minute = st.slider("Start Minute", min_value=0, max_value=59, 
-                                                    value=int((min_time % 3600)/60), step=5, key="start_minute")
-                        with col2:
-                            end_hour = st.slider("End Hour", min_value=0, max_value=23, 
-                                                value=int(max_time/3600), step=1, key="end_hour")
-                            end_minute = st.slider("End Minute", min_value=0, max_value=59, 
-                                                value=int((max_time % 3600)/60), step=5, key="end_minute")
-                        
-                        custom_start_time = start_hour * 3600 + start_minute * 60
-                        custom_end_time = end_hour * 3600 + end_minute * 60
-                    else:
-                        custom_start_time = min_time
-                        custom_end_time = max_time
-                    
-                    st.subheader("Quality Settings")
-                    dpi = st.slider("DPI (resolution)", min_value=100, max_value=300, value=150, step=25, key="dpi")
-
-                # Generate a hash of the current animation parameters
-                import hashlib
-                import json
-                
-                # Create a dictionary of all animation parameters
-                anim_params = {
-                    "map_style": anim_map_style,
-                    "fig_width": anim_fig_width,
-                    "duration": anim_duration,
-                    "fps": anim_fps,
-                    "marker_size": marker_size,
-                    "line_width": line_width,
-                    "lat_buffer": anim_lat_buffer,
-                    "lon_buffer": anim_lon_buffer,
-                    "title": anim_title,
-                    "show_time": show_time,
-                    "show_legend": show_legend,
-                    "trail_duration": trail_duration,
-                    "use_custom_bounds": anim_use_custom_bounds,
-                    "lat_min": anim_lat_min if anim_use_custom_bounds else None,
-                    "lat_max": anim_lat_max if anim_use_custom_bounds else None,
-                    "lon_min": anim_lon_min if anim_use_custom_bounds else None,
-                    "lon_max": anim_lon_max if anim_use_custom_bounds else None,
-                    "custom_time_range": custom_time_range,
-                    "start_time": custom_start_time if custom_time_range else None,
-                    "end_time": custom_end_time if custom_time_range else None,
-                    "dpi": dpi
-                }
-                
-                # Generate a hash of these parameters
-                anim_params_str = json.dumps(anim_params, sort_keys=True)
-                current_anim_hash = hashlib.md5(anim_params_str.encode()).hexdigest()
-                
-                # Check if parameters have changed since last generation
-                anim_params_changed = current_anim_hash != st.session_state.anim_params_hash
-                
-                # Display a note if parameters have changed since last generation
-                if anim_params_changed and st.session_state.animation_generated:
-                    st.info("Animation parameters have changed. Click 'Generate Animation' to update the visualization.")
-                
-                # Generate animation button
-                animation_button_clicked = st.button("Generate Animation")
-                
-                # Display the animation if button clicked or if it was previously generated
-                if animation_button_clicked or st.session_state.animation_generated:
-                    # Regenerate only if button was explicitly clicked or if first time
-                    needs_regeneration = (animation_button_clicked or st.session_state.animation_bytes is None)
-                    
-                    # Generate the animation if needed
-                    if needs_regeneration:
-                        with st.spinner("Generating animation... This may take a while depending on duration and quality settings."):
-                            try:
-                                animation_file = generate_animation(
-                                    combined_df,
-                                    duration=anim_duration,
-                                    fps=anim_fps,
-                                    start_time=custom_start_time,
-                                    end_time=custom_end_time,
-                                    dpi=dpi,
-                                    trail_duration=trail_duration,
-                                    marker_size=marker_size,
-                                    line_width=line_width,
-                                    add_terrain=True,
-                                    map_style=anim_map_style,
-                                    fig_width=int(anim_fig_width),
-                                    lat_buffer=anim_lat_buffer,
-                                    lon_buffer=anim_lon_buffer,
-                                    lat_min=anim_lat_min,
-                                    lat_max=anim_lat_max,
-                                    lon_min=anim_lon_min,
-                                    lon_max=anim_lon_max,
-                                    title=anim_title,
-                                    show_time=show_time,
-                                    show_legend=show_legend
-                                )
-                                
-                                # Store the animation file path and load the bytes
-                                st.session_state.animation_file = animation_file
-                                with open(animation_file, 'rb') as video_file:
-                                    st.session_state.animation_bytes = video_file.read()
-                                
-                                st.session_state.animation_generated = True
-                                # Update the hash and store current parameters
-                                st.session_state.anim_params_hash = current_anim_hash
-                                st.session_state.current_anim_params = anim_params
-                                
-                            except Exception as e:
-                                st.error(f"Error generating animation: {e}")
-                                st.session_state.animation_generated = False
-                                st.session_state.animation_bytes = None
-                    
-                    # Display the animation if it was successfully generated
-                    if st.session_state.animation_generated and st.session_state.animation_bytes is not None:
-                        col1, col2, col3 = st.columns([1, 4, 1])
-                        with col2:
-                            st.success("Animation generated successfully!")
                             
-                            # Display the video using the stored bytes
-                            st.video(st.session_state.animation_bytes, loop=True)
+                            # Store the animation file path and load the bytes
+                            st.session_state.animation_file = animation_file
+                            with open(animation_file, "rb") as video_file:
+                                st.session_state.animation_bytes = video_file.read()
                             
-                            # Provide download link
-                            if anim_title == "":
-                                download_label = "animation"
-                            else:
-                                download_label = anim_title
-                                
-                            if st.session_state.animation_file:
-                                st.markdown(get_binary_file_downloader_html(st.session_state.animation_file, download_label), 
-                                           unsafe_allow_html=True)
+                            st.session_state.animation_generated = True
+                            # Update the hash and store current parameters
+                            st.session_state.anim_params_hash = anim_current_hash
+                            st.session_state.current_anim_params = anim_params
+                            
+                        except Exception as e:
+                            st.error(f"Error generating animation: {e}")
+                            st.session_state.animation_generated = False
+                            st.session_state.animation_bytes = None
+                
+                # Display the animation if it was successfully generated
+                if st.session_state.animation_generated and st.session_state.animation_bytes is not None:
+                    st.success("Animation generated successfully!")
+                    
+                    # Display the video using the stored bytes
+                    st.video(st.session_state.animation_bytes, loop=True)
+                    
+                    # Provide download link
+                    if anim_title == "":
+                        download_label = "animation"
+                    else:
+                        download_label = anim_title
+                        
+                    if st.session_state.animation_file:
+                        st.markdown(get_binary_file_downloader_html(st.session_state.animation_file, download_label), 
+                                    unsafe_allow_html=True)
 
-                st.divider()
-
-            else:
-                st.error("No valid data found in the uploaded GPX files")
+        st.divider()
 
 if __name__ == "__main__":
     main()
