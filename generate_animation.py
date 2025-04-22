@@ -148,7 +148,7 @@ def generate_animation(
         
         if show_time:
             # Format the time as HH:MM
-            display_time_seconds = (np.floor(current_time_seconds / (15*60))) * (15*60)
+            display_time_seconds = (np.floor(current_time_seconds / (5*60))) * (5*60)
             time_str = pd.to_datetime(display_time_seconds, unit="s").strftime("%H:%M")
             time_text.set_text(f"Time: {time_str}")
         else:

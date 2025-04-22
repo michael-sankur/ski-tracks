@@ -30,8 +30,9 @@ def parse_gpx_files(uploaded_files) -> pd.DataFrame | None:
             with open(tmp_path, "r") as f:
                 gpx = gpxpy.parse(f)
             
-            track_points = []
+            
             for track in gpx.tracks:
+                track_points = []
                 for segment in track.segments:
                     for point in segment.points:
                         track_points.append(
@@ -43,27 +44,55 @@ def parse_gpx_files(uploaded_files) -> pd.DataFrame | None:
                             point.elevation)
                         )
 
-            if track_points:  # Only process if there are points
-                df = pd.DataFrame(track_points, columns=["file_name", "track_name", "timestamp", "latitude", "longitude", "elevation"])
-                df["timestamp"] = pd.to_datetime(df["timestamp"])
-                
-                # Handle timezone conversion safely
-                try:
-                    df["timestamp"] = df["timestamp"].dt.tz_convert("US/Pacific")
-                except:
+                if track_points:  # Only process if there are points
+                    df = pd.DataFrame(track_points, columns=["file_name", "track_name", "timestamp", "latitude", "longitude", "elevation"])
+                    df["timestamp"] = pd.to_datetime(df["timestamp"])
+                    
+                    # Handle timezone conversion safely
                     try:
-                        df["timestamp"] = df["timestamp"].dt.tz_localize("UTC").dt.tz_convert("US/Pacific")
+                        df["timestamp"] = df["timestamp"].dt.tz_convert("US/Pacific")
                     except:
-                        st.warning(f"Could not convert timestamps for {uploaded_file.name}. Using as is.")
-                
-                df["time"] = df["timestamp"].dt.strftime("%H:%M:%S")
-                hours = df["timestamp"].dt.hour
-                minutes = df["timestamp"].dt.minute
-                seconds = df["timestamp"].dt.second
-                elapsed_seconds = hours * 3600 + minutes * 60 + seconds
-                df["elapsed_seconds"] = elapsed_seconds
-                
-                df_list.append(df)
+                        try:
+                            df["timestamp"] = df["timestamp"].dt.tz_localize("UTC").dt.tz_convert("US/Pacific")
+                        except:
+                            st.warning(f"Could not convert timestamps for {uploaded_file.name}. Using as is.")
+
+                    min_track_timestamp = df["timestamp"].min()
+
+                    # Create a datetime object for midnight of the day of the minimum timestamp
+                    if min_track_timestamp.tzinfo is not None:
+                    # Create a timezone-aware datetime object for midnight of the minimum timestamp's day
+                        start_time = pd.Timestamp(
+                            year=min_track_timestamp.year,
+                            month=min_track_timestamp.month,
+                            day=min_track_timestamp.day,
+                            hour=0,
+                            minute=0,
+                            second=0,
+                            tz=min_track_timestamp.tzinfo  # Use the same timezone as your data
+                        )
+                    else:
+                        # If timestamps are timezone-naive, create a naive midnight datetime
+                        start_time = pd.Timestamp(
+                            year=min_track_timestamp.year,
+                            month=min_track_timestamp.month,
+                            day=min_track_timestamp.day,
+                            hour=0,
+                            minute=0,
+                            second=0
+                        )
+
+                    # Calculate the difference in seconds between each timestamp and start_time
+                    df["elapsed_seconds"] = (df["timestamp"] - start_time).dt.total_seconds()
+                    
+                    df["time"] = df["timestamp"].dt.strftime("%H:%M:%S")
+                    
+                    for track_name in sorted(df["track_name"].unique()):
+                        print(f"Track: {track_name}, Points: {len(df[df['track_name'] == track_name])}")
+                        print(f"Elapsed second: {df[df['track_name'] == track_name]['elapsed_seconds'].min()}")
+                        print(f"Elapsed second: {df[df['track_name'] == track_name]['elapsed_seconds'].max()}")
+
+                    df_list.append(df)
         except Exception as e:
             st.error(f"Error processing {uploaded_file.name}: {e}")
         finally:

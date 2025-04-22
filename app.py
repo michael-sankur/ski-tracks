@@ -1,5 +1,33 @@
 # GPX Track Visualizer App
 
+
+"""
+
+- Select tracks from overall list
+
+- Support for tracks longer than 1 day
+-- If track spans over multiple days
+-- Need to adjust duration for animation
+-- Need to adjust custom time range slider
+-- Display day + time, or only time with hours?
+-- max(number of unique dates * 24, length of track in hours) for sliders etc
+
+
+- Custom NSEW padding for map bounds
+- Coordinates on map
+- Calculate lat/lon bounds in app, pass into generate_map
+
+- Custom NSEW padding for animation bounds
+- Coordinates on animation
+- Hide line or markers on animation with 0 value
+- Progress bar for animation generation
+- Calculate lat/lon bounds in app, pass into generate_animation
+
+- Refresh df when files change
+
+
+"""
+
 import base64
 import hashlib
 import json
@@ -111,6 +139,42 @@ def main():
         
         st.divider()
 
+        # options_list = []
+
+        def show_checklist(options_list):
+            # Create a list to store the status of each checkbox (True = checked)
+            if 'checkbox_states' not in st.session_state:
+                # Initialize all checkboxes as checked (True)
+                st.session_state.checkbox_states = [True] * len(options_list)
+            
+            # Display checkboxes and update their states
+            for k1, option in enumerate(options_list):
+                st.session_state.checkbox_states[k1] = st.checkbox(
+                    option, 
+                    value=st.session_state.checkbox_states[k1],
+                    key=f"checkbox_{k1}"
+                )
+            
+            # Return only the selected options
+            selected_options = [opt for opt, state in zip(options_list, st.session_state.checkbox_states) if state]
+            return selected_options
+
+        # Example usage
+        st.title("Options Selection")
+
+        # Your original list of options
+        all_options = ["Option 1", "Option 2", "Option 3", "Option 4", "Option 5"]
+
+        # Show the checklist and get selected options
+        if uploaded_files and combined_df is not None and not combined_df.empty:
+            track_list = sorted(combined_df["track_name"].unique().tolist() if combined_df is not None else [])
+            selected = show_checklist(track_list)
+
+            # Display the selected options
+            st.write("You selected:", selected)
+
+        st.divider()
+
         # Visualization mode selection
         st.subheader("Visualization Mode")
         vis_mode = st.radio(
@@ -138,11 +202,17 @@ def main():
                 elif vis_mode == "track":
                     track_info = ""
                     for file_name in sorted(combined_df["file_name"].unique()):
-                        # track_info += f"File: {file_name} - {len(combined_df[combined_df["file_name"] == file_name]["track_name"].unique())} track(s)\n"
-                        # track_info += "Tracks:\n"
-                        for track_name in sorted(combined_df[combined_df["file_name"] == file_name]["track_name"].unique()):
-                            track_points = len(combined_df[combined_df["track_name"] == track_name])
-                            track_info += f"  - {track_name} - {track_points} points\n"
+                        track_info += f"File: {file_name}\n"
+                        for track_name in sorted(combined_df[(combined_df["file_name"] == file_name)]["track_name"].unique()):
+                            # Filter by both file_name AND track_name
+                            track_points = combined_df[(combined_df["file_name"] == file_name) & 
+                                                    (combined_df["track_name"] == track_name)]
+                            
+                            # Format the times to be more readable (optional)
+                            min_seconds = track_points["elapsed_seconds"].min()
+                            max_seconds = track_points["elapsed_seconds"].max()
+                            
+                            track_info += f"  - {track_name} - {len(track_points)} points - {min_seconds:.1f}s to {max_seconds:.1f}s\n"
                         track_info += "\n"
                     
                     # Display in a text area which is scrollable by default
@@ -213,9 +283,9 @@ def main():
                     stat_max_time_rounded = stat_max_time - (stat_max_time % (30*60)) + 30*60
 
                     stat_time_options = []
-                    for hour in range(25):
+                    for hour in range(49):
                         for minute in [0, 15, 30, 45]:
-                            if hour == 24 and minute > 0:
+                            if hour == 48 and minute > 0:
                                 continue
                             stat_time_options.append(f"{hour:02d}:{minute:02d}")
 
@@ -241,9 +311,9 @@ def main():
                     stat_end_seconds = 3600 * stat_end_hour + 60 * stat_end_minute
                 else:
                     stat_time_options = []
-                    for hour in range(25):
+                    for hour in range(49):
                         for minute in [0, 15, 30, 45]:
-                            if hour == 24 and minute > 0:
+                            if hour == 48 and minute > 0:
                                 continue
                             stat_time_options.append(f"{hour:02d}:{minute:02d}")
                     stat_selected_range = st.select_slider(
@@ -394,9 +464,9 @@ def main():
                     anim_max_time_rounded = anim_max_time - (anim_max_time % (30*60)) + 30*60
 
                     anim_time_options = []
-                    for hour in range(25):
+                    for hour in range(49):
                         for minute in [0, 15, 30, 45]:
-                            if hour == 24 and minute > 0:
+                            if hour == 48 and minute > 0:
                                 continue
                             anim_time_options.append(f"{hour:02d}:{minute:02d}")
 
@@ -423,9 +493,9 @@ def main():
 
                 else:
                     anim_time_options = []
-                    for hour in range(25):
+                    for hour in range(49):
                         for minute in [0, 15, 30, 45]:
-                            if hour == 24 and minute > 0:
+                            if hour == 48 and minute > 0:
                                 continue
                             anim_time_options.append(f"{hour:02d}:{minute:02d}")
                     anim_selected_range = st.select_slider(
