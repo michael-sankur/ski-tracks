@@ -168,10 +168,10 @@ def main():
         # Show the checklist and get selected options
         if uploaded_files and combined_df is not None and not combined_df.empty:
             track_list = sorted(combined_df["track_name"].unique().tolist() if combined_df is not None else [])
-            selected = show_checklist(track_list)
+            track_selected = show_checklist(track_list)
 
             # Display the selected options
-            st.write("You selected:", selected)
+            st.write("You selected:", track_selected)
 
         st.divider()
 
@@ -269,13 +269,27 @@ def main():
             stat_line_width = st.slider("Line Width", min_value=1, max_value=4, value=2, step=1, key="stat_line_width")
             stat_marker_size = st.slider("Marker Size", min_value=1, max_value=8, value=4, step=1, key="stat_marker_size")
 
-            stat_start_seconds = 0
-            stat_end_seconds = 24 * 3600
+            # stat_start_seconds = 0
+            # stat_end_seconds = 24 * 3600
 
             with st.expander("Custom Time Range", expanded=False):
                 
                 if uploaded_files and combined_df is not None and not combined_df.empty:
-                    st.write(f"Data time range: {combined_df["time"].min()[0:-3]} to {combined_df["time"].max()[0:-3]}")
+
+                    stat_num_days = np.floor(combined_df["elapsed_seconds"].max() / (24*3600)) + 1
+                    stat_num_days = int(max(stat_num_days, 1))
+
+                    stat_start_seconds = 0
+                    stat_end_seconds = stat_num_days * 24 * 3600
+
+                    data_time_min_hour = int(np.floor(combined_df["elapsed_seconds"].min() / 3600))
+                    data_time_min_minute = int(np.floor((combined_df["elapsed_seconds"].min() % 3600) / 60))
+
+                    data_time_max_hour = int(np.ceil(combined_df["elapsed_seconds"].max() / 3600 - 24*(stat_num_days-1)))
+                    data_time_max_minute = int(np.ceil((combined_df["elapsed_seconds"].max() % 3600) / 60))
+
+
+                    st.write(f"Data time range: Day {1} at {data_time_min_hour}:{data_time_min_minute}  -  Day {stat_num_days} at {data_time_max_hour}:{data_time_max_minute}")
 
                     stat_min_time = combined_df["elapsed_seconds"].min()
                     stat_min_time_rounded = stat_min_time - (stat_min_time % (30*60))
@@ -283,9 +297,9 @@ def main():
                     stat_max_time_rounded = stat_max_time - (stat_max_time % (30*60)) + 30*60
 
                     stat_time_options = []
-                    for hour in range(49):
+                    for hour in range(stat_num_days*24 + 1):
                         for minute in [0, 15, 30, 45]:
-                            if hour == 48 and minute > 0:
+                            if hour == stat_num_days*24 and minute > 0:
                                 continue
                             stat_time_options.append(f"{hour:02d}:{minute:02d}")
 
@@ -309,11 +323,13 @@ def main():
 
                     stat_start_seconds = 3600 * stat_start_hour + 60 * stat_start_minute
                     stat_end_seconds = 3600 * stat_end_hour + 60 * stat_end_minute
+
+                    st.write(stat_start_seconds, stat_end_seconds)
                 else:
                     stat_time_options = []
-                    for hour in range(49):
+                    for hour in range(25):
                         for minute in [0, 15, 30, 45]:
-                            if hour == 48 and minute > 0:
+                            if hour == 24 and minute > 0:
                                 continue
                             stat_time_options.append(f"{hour:02d}:{minute:02d}")
                     stat_selected_range = st.select_slider(
@@ -456,7 +472,21 @@ def main():
             with st.expander("Custom Time Range", expanded=False):
                 
                 if uploaded_files and combined_df is not None and not combined_df.empty:
-                    st.write(f"Data time range: {combined_df["time"].min()[0:-3]} to {combined_df["time"].max()[0:-3]}")
+
+                    anim_num_days = np.floor(combined_df["elapsed_seconds"].max() / (24*3600)) + 1
+                    anim_num_days = int(max(anim_num_days, 1))
+
+                    anim_start_seconds = 0
+                    anim_end_seconds = anim_num_days * 24 * 3600
+
+                    data_time_min_hour = int(np.floor(combined_df["elapsed_seconds"].min() / 3600))
+                    data_time_min_minute = int(np.floor((combined_df["elapsed_seconds"].min() % 3600) / 60))
+
+                    data_time_max_hour = int(np.ceil(combined_df["elapsed_seconds"].max() / 3600 - 24*(anim_num_days-1)))
+                    data_time_max_minute = int(np.ceil((combined_df["elapsed_seconds"].max() % 3600) / 60))
+
+
+                    st.write(f"Data time range: Day {1} at {data_time_min_hour}:{data_time_min_minute}  -  Day {anim_num_days} at {data_time_max_hour}:{data_time_max_minute}")
 
                     anim_min_time = combined_df["elapsed_seconds"].min()
                     anim_min_time_rounded = anim_min_time - (anim_min_time % (30*60))
@@ -464,25 +494,25 @@ def main():
                     anim_max_time_rounded = anim_max_time - (anim_max_time % (30*60)) + 30*60
 
                     anim_time_options = []
-                    for hour in range(49):
+                    for hour in range(anim_num_days*24 + 1):
                         for minute in [0, 15, 30, 45]:
-                            if hour == 48 and minute > 0:
+                            if hour == anim_num_days*24 and minute > 0:
                                 continue
                             anim_time_options.append(f"{hour:02d}:{minute:02d}")
 
-                    # Default to nearest 15-minute intervals
+                    # Default to nearest 30-minute intervals
                     anim_default_start_idx = int(2*np.floor(anim_min_time_rounded / (30*60)))
                     anim_default_end_idx = int(2*np.ceil(anim_max_time_rounded / (30*60)))
 
+
                     # Create a range slider using the select_slider
                     anim_selected_range = st.select_slider(
-                        "Animation time range",
+                        "Time range",
                         options=anim_time_options,
                         value=(anim_time_options[anim_default_start_idx], anim_time_options[anim_default_end_idx]),
                         key="anim_time_range"
                     )
 
-                    # You can then convert these back to decimal hours if needed for calculations
                     anim_start_time, anim_end_time = anim_selected_range
 
                     anim_start_hour, anim_start_minute = map(int, anim_start_time.split(":"))
@@ -491,19 +521,7 @@ def main():
                     anim_start_seconds = 3600 * anim_start_hour + 60 * anim_start_minute
                     anim_end_seconds = 3600 * anim_end_hour + 60 * anim_end_minute
 
-                else:
-                    anim_time_options = []
-                    for hour in range(49):
-                        for minute in [0, 15, 30, 45]:
-                            if hour == 48 and minute > 0:
-                                continue
-                            anim_time_options.append(f"{hour:02d}:{minute:02d}")
-                    anim_selected_range = st.select_slider(
-                            "Time range",
-                            options=anim_time_options,
-                            value=(anim_time_options[0], anim_time_options[-1]),
-                            key="anim_time_range"
-                        )
+                    st.write(anim_start_seconds, anim_end_seconds)
         
         with anim_col_03:
             st.subheader("Animation Settings")
