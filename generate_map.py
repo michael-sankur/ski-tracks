@@ -9,13 +9,11 @@ from providers import PROVIDERS
 from util import get_distinct_colors
 
 def generate_map(
-    combined_df,
+    df,
     *,
     mode="track",
     map_style="USTopo",
-    fig_width=8,
-    lat_padding=0.125,
-    lon_padding=0.125, 
+    fig_width=8, 
     lat_min=None,
     lat_max=None,
     lon_min=None,
@@ -23,50 +21,44 @@ def generate_map(
     title="",
     show_start_end_points=False,
     show_legend=False,
-    show_coordinates=False,\
-    line_width=2,
-    start_end_marker_size=4,
+    show_coordinates=False,
+    line_width=4,
+    start_end_marker_size=8,
     start_time=0,
     end_time=24*3600
 ):
     """
-    Preview the map with all tracks fully plotted.
+    Generate a static map with GPX tracks plotted on it.
     Args:
-        combined_df (pd.DataFrame): DataFrame containing track data.
-        map_style (str): Basemap style.
-        fig_width (float): Width of the figure.
-        lat_padding (float): Buffer for latitude bounds.
-        lon_padding (float): Buffer for longitude bounds.
-        lat_min (float): Minimum latitude for figure bounds.
-        lat_max (float): Maximum latitude for figure bounds.
-        lon_min (float): Minimum longitude for figure bounds.
-        lon_max (float): Maximum longitude for figure bounds.
+        df (pd.DataFrame): DataFrame containing GPX track data with columns 'latitude', 'longitude', 'track_name', 'file_name', and 'elapsed_seconds'.
+        mode (str): Mode of plotting, either "track" or "file".
+        map_style (str): Style of the basemap to use.
+        fig_width (float): Width of the figure in inches.
+        lat_min, lat_max, lon_min, lon_max (float): Optional latitude and longitude bounds for the map.
         title (str): Title of the map.
-        start_end_points (bool): Whether to show start and end points.
-        show_legend (bool): Whether to show legend.
+        show_start_end_points (bool): Whether to show start and end points of tracks.
+        show_legend (bool): Whether to show a legend for the tracks.
+        show_coordinates (bool): Whether to show coordinates on the axes.
+        line_width (float): Width of the lines representing tracks.
+        start_end_marker_size (int): Size of markers for start and end points.
+        start_time, end_time (int): Time range in seconds to filter tracks.
     Returns:
-        fig: Matplotlib figure object.
+        fig (matplotlib.figure.Figure): The generated map figure.
     """
 
     try:
 
-        # Determine the latitude and longitude bounds of the tracks
-        track_lat_delta = combined_df["latitude"].max() - combined_df["latitude"].min()
-        track_lon_delta = combined_df["longitude"].max() - combined_df["longitude"].min()
+        # Determine the latitude and longitude difference of the tracks
+        track_lat_delta = df["latitude"].max() - df["latitude"].min()
+        track_lon_delta = df["longitude"].max() - df["longitude"].min()
         
-        # Add paddings to the bounds as portion of existing difference between upper and lower bounds
-        track_lat_min = combined_df["latitude"].min() - lat_padding*track_lat_delta
-        track_lat_max = combined_df["latitude"].max() + lat_padding*track_lat_delta
-        track_lon_min = combined_df["longitude"].min() - lon_padding*track_lon_delta
-        track_lon_max = combined_df["longitude"].max() + lon_padding*track_lon_delta
+        # Calculate default latitude and longitude bounds if not provided
+        fig_lat_min = lat_min if lat_min else df["latitude"].min() - 0.125 * track_lat_delta
+        fig_lat_max = lat_max if lat_min else df["latitude"].max() + 0.125 * track_lat_delta
+        fig_lon_min = lon_min if lon_min else df["longitude"].min() - 0.125 * track_lon_delta
+        fig_lon_max = lon_max if lon_max else df["longitude"].max() + 0.125 * track_lon_delta
         
-        # Use custom bounds if provided, otherwise use data bounds
-        fig_lat_min = lat_min if lat_min is not None else track_lat_min
-        fig_lat_max = lat_max if lat_max is not None else track_lat_max
-        fig_lon_min = lon_min if lon_min is not None else track_lon_min
-        fig_lon_max = lon_max if lon_max is not None else track_lon_max
-        
-        # Calculate figure height based on aspect ratio
+        # Calculate figure aspect ratio and height from latitude and longitude bounds
         fig_lat_diff = fig_lat_max - fig_lat_min
         fig_lon_diff = fig_lon_max - fig_lon_min    
         fig_lat_lon_ratio = fig_lat_diff / fig_lon_diff
@@ -91,15 +83,14 @@ def generate_map(
 
         ax.set_xlabel("")
         ax.set_ylabel("")
-        if not show_coordinates:
-            ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
+        
         
         # Generate colors for all tracks
         track_names = []
         if mode == "track":
-            track_names = sorted(combined_df["track_name"].unique())
+            track_names = sorted(df["track_name"].unique())
         elif mode == "file":
-            track_names = sorted(combined_df["file_name"].unique())
+            track_names = sorted(df["file_name"].unique())
         else:
             st.error("Invalid mode specified. Use 'track' or 'file'.")
             return None
@@ -108,16 +99,16 @@ def generate_map(
 
         # Plot all tracks with their full paths
         for track_name in track_names:
-            track_data = combined_df[
-                (combined_df["track_name"] == track_name) & 
-                (combined_df["elapsed_seconds"] >= start_time) & 
-                (combined_df["elapsed_seconds"] <= end_time)
+            track_data = df[
+                (df["track_name"] == track_name) & 
+                (df["elapsed_seconds"] >= start_time) & 
+                (df["elapsed_seconds"] <= end_time)
             ]
 
             if len(track_data) == 0:
                 continue
             else:
-            
+
                 # Sort by timestamp to ensure proper path drawing
                 track_data = track_data.sort_values(by="elapsed_seconds")
                 
@@ -127,7 +118,7 @@ def generate_map(
                     track_data["latitude"], 
                     color=color_map[track_name],
                     linewidth=line_width,
-                    alpha=0.8,
+                    alpha=1.0,
                     label=track_name
                 )
                 
@@ -143,6 +134,11 @@ def generate_map(
         # Add legend if there are multiple tracks
         if show_legend:
             ax.legend(loc='upper right', fontsize=8)
+
+        if show_coordinates:
+            pass
+        else:
+            ax.tick_params(left=False, bottom=False, labelleft=False, labelbottom=False)
         
         if title != "":
             ax.set_title(title, fontsize=12)

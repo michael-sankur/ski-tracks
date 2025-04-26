@@ -31,6 +31,7 @@
 import base64
 import hashlib
 import json
+from tracemalloc import start
 import numpy as np
 import pandas as pd
 import os
@@ -43,8 +44,8 @@ from generate_animation import generate_animation
 
 
 # Initialize session state variables
-if "combined_df" not in st.session_state:
-    st.session_state.combined_df = None
+if "df_combined" not in st.session_state:
+    st.session_state.df_combined = None
 if "stat_map_generated" not in st.session_state:
     st.session_state.stat_map_generated = False
 if "animation_generated" not in st.session_state:
@@ -89,6 +90,24 @@ def on_files_uploaded():
         except:
             pass
 
+def show_checklist(options_list):
+    # Create a list to store the status of each checkbox (True = checked)
+    if "checkbox_states" not in st.session_state:
+        # Initialize all checkboxes as checked (True)
+        st.session_state.checkbox_states = [True] * len(options_list)
+    
+    # Display checkboxes and update their states
+    for k1, option in enumerate(options_list):
+        st.session_state.checkbox_states[k1] = st.checkbox(
+            option, 
+            value=st.session_state.checkbox_states[k1],
+            key=f"checkbox_{k1}"
+        )
+    
+    # Return only the selected options
+    selected_options = [opt for opt, state in zip(options_list, st.session_state.checkbox_states) if state]
+    return selected_options
+
 
 # Streamlit app
 def main():
@@ -104,7 +123,7 @@ def main():
         st.divider()
 
         st.header("Upload GPX Files")
-        st.write("Upload one or more GPX files containing GPS tracks. The app will parse the files and create a visualization of the tracks on a map or create an animation of the tracks over time.")
+        st.write("Upload one or more GPX files containing GPS tracks.")
                 
         # File uploader
         uploaded_files = st.file_uploader(
@@ -116,22 +135,22 @@ def main():
 
         if uploaded_files:
             # Only process GPX files if we have not processed them already or if they changed
-            if st.session_state.combined_df is None:
+            if st.session_state.df_combined is None:
                 with st.spinner("Processing GPX files..."):
-                    combined_df = parse_gpx_files(uploaded_files)
-                st.session_state.combined_df = combined_df
+                    df_combined = parse_gpx_files(uploaded_files)
+                st.session_state.df_combined = df_combined
             else:
-                combined_df = st.session_state.combined_df
+                df_combined = st.session_state.df_combined
             
-        if uploaded_files and combined_df is not None and not combined_df.empty:
+        if uploaded_files and df_combined is not None and not df_combined.empty:
             st.success(f"Loaded and parsed GPX file(s)")
             with st.expander("File and Track Information", expanded=False):
                 track_info = ""
-                for file_name in sorted(combined_df["file_name"].unique()):
-                    track_info += f"File: {file_name} - {len(combined_df[combined_df["file_name"] == file_name]["track_name"].unique())} track(s)\n"
+                for file_name in sorted(df_combined["file_name"].unique()):
+                    track_info += f"File: {file_name} - {len(df_combined[df_combined["file_name"] == file_name]["track_name"].unique())} track(s)\n"
                     # track_info += "Tracks:\n"
-                    for track_name in sorted(combined_df[combined_df["file_name"] == file_name]["track_name"].unique()):
-                        track_points = len(combined_df[combined_df["track_name"] == track_name])
+                    for track_name in sorted(df_combined[df_combined["file_name"] == file_name]["track_name"].unique()):
+                        track_points = len(df_combined[df_combined["track_name"] == track_name])
                         track_info += f"  - {track_name} - {track_points} points\n"
                     track_info += "\n"
                     
@@ -139,126 +158,92 @@ def main():
         
         st.divider()
 
-        # options_list = []
-
-        def show_checklist(options_list):
-            # Create a list to store the status of each checkbox (True = checked)
-            if 'checkbox_states' not in st.session_state:
-                # Initialize all checkboxes as checked (True)
-                st.session_state.checkbox_states = [True] * len(options_list)
-            
-            # Display checkboxes and update their states
-            for k1, option in enumerate(options_list):
-                st.session_state.checkbox_states[k1] = st.checkbox(
-                    option, 
-                    value=st.session_state.checkbox_states[k1],
-                    key=f"checkbox_{k1}"
-                )
-            
-            # Return only the selected options
-            selected_options = [opt for opt, state in zip(options_list, st.session_state.checkbox_states) if state]
-            return selected_options
-
         # Example usage
-        st.title("Options Selection")
+        st.title("Select Tracks")
 
-        # Your original list of options
-        all_options = ["Option 1", "Option 2", "Option 3", "Option 4", "Option 5"]
-
+        selected_tracks = []
         # Show the checklist and get selected options
-        if uploaded_files and combined_df is not None and not combined_df.empty:
-            track_list = sorted(combined_df["track_name"].unique().tolist() if combined_df is not None else [])
-            track_selected = show_checklist(track_list)
+        if uploaded_files and df_combined is not None and not df_combined.empty:
+            all_tracks = sorted(df_combined["track_name"].unique().tolist() if df_combined is not None else [])
+            selected_tracks = show_checklist(all_tracks)
+            df_selected_tracks = df_combined[df_combined["track_name"].isin(selected_tracks)].copy()
+        else:
+            st.write("No data available. Upload one or more GPX files.")
+            selected_tracks = []
+            df_selected_tracks = None       
 
-            # Display the selected options
-            st.write("You selected:", track_selected)
-
-        st.divider()
-
-        # Visualization mode selection
-        st.subheader("Visualization Mode")
-        vis_mode = st.radio(
-            label="Select Visualization Mode",
-            index=0,
-            options=["Visualize files", "Visualize tracks"],
-            key="visualization_mode",
-            captions=[
-                "Combine all tracks within each file into a single track. Select if you export one trip per file. If an trip is split into multiple tracks, they will be combined into a single track.",
-                "Keep each track in GPX files separate. Select if you export multiple trips per file. If a trip is split into multiple tracks, they will be NOT combined into a single track, and be treated as multiple trips."
-            ]
-        )
-        vis_mode = "file" if vis_mode == "Visualize files" else "track"
-
-        # Create an expandable container for the file/track information
-        if uploaded_files and combined_df is not None and not combined_df.empty:        
-            with st.expander("File and Track Information", expanded=False):
-                if vis_mode == "file":
-                    file_info = ""
-                    for file_name in sorted(combined_df["file_name"].unique()):
-                        file_info += f"File {file_name}.gpx combined into a track of {len(combined_df[combined_df["file_name"] == file_name])} points\n"
-
-                    st.text_area("", file_info, height=200, disabled=True)
-                
-                elif vis_mode == "track":
-                    track_info = ""
-                    for file_name in sorted(combined_df["file_name"].unique()):
-                        track_info += f"File: {file_name}\n"
-                        for track_name in sorted(combined_df[(combined_df["file_name"] == file_name)]["track_name"].unique()):
-                            # Filter by both file_name AND track_name
-                            track_points = combined_df[(combined_df["file_name"] == file_name) & 
-                                                    (combined_df["track_name"] == track_name)]
-                            
-                            # Format the times to be more readable (optional)
-                            min_seconds = track_points["elapsed_seconds"].min()
-                            max_seconds = track_points["elapsed_seconds"].max()
-                            
-                            track_info += f"  - {track_name} - {len(track_points)} points - {min_seconds:.1f}s to {max_seconds:.1f}s\n"
-                        track_info += "\n"
-                    
-                    # Display in a text area which is scrollable by default
-                    st.text_area("", track_info, height=200, disabled=True)
+        vis_mode = "track"
 
         st.divider()
+
 
         # Static Map Visualization
         st.header("Generate Static Visualization")
+        st.write("Create a static visualization of the selected GPX tracks on the same map.")
 
         # stat_title = st.text_input("Title", "", key="stat_title")
         stat_map_settings_column, stat_vis_settings_column = st.columns(2)
         
         with stat_map_settings_column:
             st.subheader("Map Settings")
-            stat_fig_width = st.number_input("Figure Width (inches):", min_value=6.0, max_value=18.0, value=12.0, step=0.5, format="%.1f", key="stat_fig_width")
-            stat_map_style = st.selectbox("Map Style", list(PROVIDERS.keys()), index=12, key="stat_map_style")            
-            stat_lat_padding = st.number_input("Latitude Padding", min_value=0.0, max_value=1.0, value=0.125, step=0.005, format="%.3f",key="stat_lat_padding")
-            stat_lon_padding = st.number_input("Longitude Padding", min_value=0.0, max_value=1.0, value=0.125, step=0.005, format="%.3f",key="stat_lon_padding")
-
-            
+            stat_map_style = st.selectbox("Map Style", list(PROVIDERS.keys()), index=12, key="stat_map_style")
+            stat_fig_width = st.number_input("Figure Width (inches):", min_value=6.0, max_value=18.0, value=12.0, step=0.5, format="%.1f", key="stat_fig_width")     
+            stat_lat_padding = st.number_input("Latitude Padding - extra space north and south of the extents of displayed tracks", min_value=0.0, max_value=1.0, value=0.125, step=0.005, format="%.3f",key="stat_lat_padding")
+            stat_lon_padding = st.number_input("Longitude Padding - extra space east and west of the extents of displayed tracks", min_value=0.0, max_value=1.0, value=0.125, step=0.005, format="%.3f",key="stat_lon_padding")
 
             # Custom map bounds
-            stat_use_custom_bounds = False
+            stat_lat_min = 0
+            stat_lat_max = 0
+            stat_lon_min = 0
+            stat_lon_max = 0
             with st.expander("Custom Latitude and Longitude Bounds", expanded=False):
-                if uploaded_files and combined_df is not None and not combined_df.empty:
-                    stat_use_custom_bounds = st.checkbox("Use Custom Bounds", value=False, key="stat_custom_bounds")
+                
+                if uploaded_files and df_selected_tracks is not None and not df_selected_tracks.empty:
 
-                    stat_track_lat_delta = combined_df["latitude"].max() - combined_df["latitude"].min()
-                    stat_track_lon_delta = combined_df["longitude"].max() - combined_df["longitude"].min()
+                    stat_track_lat_delta = df_selected_tracks["latitude"].max() - df_selected_tracks["latitude"].min()
+                    stat_track_lon_delta = df_selected_tracks["longitude"].max() - df_selected_tracks["longitude"].min()
 
-                    stat_lat_min_default = combined_df["latitude"].min() - stat_lat_padding*stat_track_lat_delta
-                    stat_lat_max_default = combined_df["latitude"].max() + stat_lat_padding*stat_track_lat_delta
-                    stat_lon_min_default = combined_df["longitude"].min() - stat_lon_padding*stat_track_lon_delta
-                    stat_lon_max_default = combined_df["longitude"].max() + stat_lon_padding*stat_track_lon_delta
-                    
-                    if stat_use_custom_bounds:                        
-                        stat_lat_min = st.number_input("Min Latitude", value=stat_lat_min_default, format="%.4f", step=0.005, key="stat_lat_min")
-                        stat_lat_max = st.number_input("Max Latitude", value=stat_lat_max_default, format="%.4f", step=0.005, key="stat_lat_max")
-                        stat_lon_min = st.number_input("Min Longitude", value=stat_lon_min_default, format="%.4f", step=0.005, key="stat_lon_min")                        
-                        stat_lon_max = st.number_input("Max Longitude", value=stat_lon_max_default, format="%.4f", step=0.005, key="stat_lon_max")
-                    else:
+                    stat_lat_min_default = df_selected_tracks["latitude"].min() - stat_lat_padding*stat_track_lat_delta
+                    stat_lat_max_default = df_selected_tracks["latitude"].max() + stat_lat_padding*stat_track_lat_delta
+                    stat_lon_min_default = df_selected_tracks["longitude"].min() - stat_lon_padding*stat_track_lon_delta
+                    stat_lon_max_default = df_selected_tracks["longitude"].max() + stat_lon_padding*stat_track_lon_delta
+
+                    stat_custom_bounds_mode = st.radio(
+                        label="Select custom bounds mode:",
+                        options=["Use standard lat/lon padding", "Use custom NSEW padding", "Use custom latitude and longitude"],
+                        index=0,
+                        key="stat_custom_bounds_mode",
+                        horizontal=True
+                    )
+                    if stat_custom_bounds_mode == "Use standard lat/lon padding":
                         stat_lat_min = stat_lat_min_default
                         stat_lat_max = stat_lat_max_default
                         stat_lon_min = stat_lon_min_default
                         stat_lon_max = stat_lon_max_default
+
+                        st.write(f"Map latitude extents: {stat_lat_min:.4f} to {stat_lat_max:.4f}")
+                        st.write(f"Map longitude extents: {stat_lon_min:.4f} to {stat_lon_max:.4f}")
+
+                    elif stat_custom_bounds_mode == "Use custom NSEW padding":
+                        stat_north_padding = st.number_input("North Padding", min_value=0.0, max_value=1.0, value=stat_lat_padding, step=0.005, format="%.3f", key="stat_north_padding")
+                        stat_south_padding = st.number_input("South Padding", min_value=0.0, max_value=1.0, value=stat_lat_padding, step=0.005, format="%.3f", key="stat_south_padding")
+                        stat_east_padding = st.number_input("East Padding", min_value=0.0, max_value=1.0, value=stat_lon_padding, step=0.005, format="%.3f", key="stat_east_padding")
+                        stat_west_padding = st.number_input("West Padding", min_value=0.0, max_value=1.0, value=stat_lon_padding, step=0.005, format="%.3f", key="stat_west_padding")
+
+                        stat_lat_min = df_selected_tracks["latitude"].min() - stat_south_padding*stat_track_lat_delta
+                        stat_lat_max = df_selected_tracks["latitude"].max() + stat_north_padding*stat_track_lat_delta
+                        stat_lon_min = df_selected_tracks["longitude"].min() - stat_west_padding*stat_track_lon_delta
+                        stat_lon_max = df_selected_tracks["longitude"].max() + stat_east_padding*stat_track_lon_delta
+
+                        st.write(f"Map latitude extents: {stat_lat_min:.4f} to {stat_lat_max:.4f}")
+                        st.write(f"Map longitude extents: {stat_lon_min:.4f} to {stat_lon_max:.4f}")
+                    elif stat_custom_bounds_mode == "Use custom latitude and longitude":                        
+                        stat_lat_min = st.number_input("Min Latitude", value=stat_lat_min_default, format="%.4f", step=0.005, key="stat_lat_min")
+                        stat_lat_max = st.number_input("Max Latitude", value=stat_lat_max_default, format="%.4f", step=0.005, key="stat_lat_max")
+                        stat_lon_min = st.number_input("Min Longitude", value=stat_lon_min_default, format="%.4f", step=0.005, key="stat_lon_min")                        
+                        stat_lon_max = st.number_input("Max Longitude", value=stat_lon_max_default, format="%.4f", step=0.005, key="stat_lon_max")
+                else:
+                    st.write("No data available for custom bounds selection. Upload GPX files and select one or more tracks.")
         
         with stat_vis_settings_column:
             st.subheader("Visualization Options")
@@ -266,34 +251,29 @@ def main():
             stat_show_legend = st.checkbox("Show legend", value=False, key="stat_show_legend")
             stat_show_coordinates = st.checkbox("Show coordinates", value=False, key="stat_show_coordinates")
 
-            stat_line_width = st.slider("Line Width", min_value=1, max_value=4, value=2, step=1, key="stat_line_width")
-            stat_marker_size = st.slider("Marker Size", min_value=1, max_value=8, value=4, step=1, key="stat_marker_size")
+            stat_line_width = st.slider("Line width", min_value=1, max_value=6, value=3, step=1, key="stat_line_width")
+            stat_marker_size = st.slider("Start and end point marker size", min_value=2, max_value=12, value=6, step=1, key="stat_marker_size")
 
-            # stat_start_seconds = 0
-            # stat_end_seconds = 24 * 3600
-
+            stat_start_seconds = 0
+            stat_end_seconds = 24 * 3600
             with st.expander("Custom Time Range", expanded=False):
                 
-                if uploaded_files and combined_df is not None and not combined_df.empty:
+                if uploaded_files and df_selected_tracks is not None and not df_selected_tracks.empty:
 
-                    stat_num_days = np.floor(combined_df["elapsed_seconds"].max() / (24*3600)) + 1
+                    stat_num_days = np.ceil(df_selected_tracks["elapsed_seconds"].max() / (24*3600))
                     stat_num_days = int(max(stat_num_days, 1))
 
-                    stat_start_seconds = 0
-                    stat_end_seconds = stat_num_days * 24 * 3600
+                    stat_data_time_min_hour = int(np.floor(df_selected_tracks["elapsed_seconds"].min() / 3600))
+                    stat_data_time_min_minute = int(np.floor((df_selected_tracks["elapsed_seconds"].min() % 3600) / 60))
 
-                    data_time_min_hour = int(np.floor(combined_df["elapsed_seconds"].min() / 3600))
-                    data_time_min_minute = int(np.floor((combined_df["elapsed_seconds"].min() % 3600) / 60))
+                    stat_data_time_max_hour = int(np.floor(df_selected_tracks["elapsed_seconds"].max() / 3600 - 24*(stat_num_days-1)))
+                    stat_data_time_max_minute = int(np.floor((df_selected_tracks["elapsed_seconds"].max() % 3600) / 60))
 
-                    data_time_max_hour = int(np.ceil(combined_df["elapsed_seconds"].max() / 3600 - 24*(stat_num_days-1)))
-                    data_time_max_minute = int(np.ceil((combined_df["elapsed_seconds"].max() % 3600) / 60))
+                    st.write(f"Data time range: Day {1} at {stat_data_time_min_hour:02d}:{stat_data_time_min_minute:02d}  -  Day {stat_num_days} at {stat_data_time_max_hour:02d}:{stat_data_time_max_minute:02d}")
 
-
-                    st.write(f"Data time range: Day {1} at {data_time_min_hour}:{data_time_min_minute}  -  Day {stat_num_days} at {data_time_max_hour}:{data_time_max_minute}")
-
-                    stat_min_time = combined_df["elapsed_seconds"].min()
+                    stat_min_time = df_selected_tracks["elapsed_seconds"].min()
                     stat_min_time_rounded = stat_min_time - (stat_min_time % (30*60))
-                    stat_max_time = combined_df["elapsed_seconds"].max()
+                    stat_max_time = df_selected_tracks["elapsed_seconds"].max()
                     stat_max_time_rounded = stat_max_time - (stat_max_time % (30*60)) + 30*60
 
                     stat_time_options = []
@@ -304,56 +284,46 @@ def main():
                             stat_time_options.append(f"{hour:02d}:{minute:02d}")
 
                     # Default to nearest 30-minute intervals
-                    stat_default_start_idx = int(2*np.floor(stat_min_time_rounded / (30*60)))
-                    stat_default_end_idx = int(2*np.ceil(stat_max_time_rounded / (30*60)))
+                    stat_time_slider_default_start_idx = int(2*np.floor(stat_min_time_rounded / (30*60)))
+                    stat_time_slider_default_end_idx = int(2*np.ceil(stat_max_time_rounded / (30*60)))
+                    st.write(len(stat_time_options))
+                    st.write(stat_time_slider_default_end_idx)
 
 
                     # Create a range slider using the select_slider
-                    stat_selected_range = st.select_slider(
+                    stat_time_slider_selected_range = st.select_slider(
                         "Time range",
                         options=stat_time_options,
-                        value=(stat_time_options[stat_default_start_idx], stat_time_options[stat_default_end_idx]),
-                        key="stat_time_range"
+                        value=(stat_time_options[stat_time_slider_default_start_idx], stat_time_options[stat_time_slider_default_end_idx]),
+                        key="stat_time_slider_range"
                     )
 
-                    stat_start_time, stat_end_time = stat_selected_range
+                    stat_start_time_selected, stat_end_time_selected = stat_time_slider_selected_range
 
-                    stat_start_hour, stat_start_minute = map(int, stat_start_time.split(":"))
-                    stat_end_hour, stat_end_minute = map(int, stat_end_time.split(":"))
+                    stat_start_hour, stat_start_minute = map(int, stat_start_time_selected.split(":"))
+                    stat_end_hour, stat_end_minute = map(int, stat_end_time_selected.split(":"))
 
                     stat_start_seconds = 3600 * stat_start_hour + 60 * stat_start_minute
                     stat_end_seconds = 3600 * stat_end_hour + 60 * stat_end_minute
 
                     st.write(stat_start_seconds, stat_end_seconds)
                 else:
-                    stat_time_options = []
-                    for hour in range(25):
-                        for minute in [0, 15, 30, 45]:
-                            if hour == 24 and minute > 0:
-                                continue
-                            stat_time_options.append(f"{hour:02d}:{minute:02d}")
-                    stat_selected_range = st.select_slider(
-                            "Time range",
-                            options=stat_time_options,
-                            value=(stat_time_options[0], stat_time_options[-1]),
-                            key="stat_time_range"
-                        )
+                    st.write("No data available for custom time range selection. Upload GPX files and select one or more tracks.")
+                    
         col1, col2, col3 = st.columns([1, 4, 1])
         with col2:
             stat_title = st.text_input("Title", "", key="stat_title")
         
             # Create a dictionary of all static map parameters
             stat_params = {
+                "selected_tracks": selected_tracks,
                 "vis_mode": vis_mode,
                 "map_style": stat_map_style,
                 "fig_width": stat_fig_width,
-                "lat_padding": stat_lat_padding,
-                "lon_padding": stat_lon_padding,
-                "use_custom_bounds": stat_use_custom_bounds,
-                "lat_min": stat_lat_min if stat_use_custom_bounds else None,
-                "lat_max": stat_lat_max if stat_use_custom_bounds else None,
-                "lon_min": stat_lon_min if stat_use_custom_bounds else None,
-                "lon_max": stat_lon_max if stat_use_custom_bounds else None,            
+                "lat_min": stat_lat_min,
+                "lat_max": stat_lat_max,
+                "lon_min": stat_lon_min,
+                "lon_max": stat_lon_max,
                 "show_start_end_points": stat_show_start_end_points,
                 "show_legend": stat_show_legend,            
                 "show_coordinates": stat_show_coordinates,
@@ -375,7 +345,7 @@ def main():
             if stat_params_changed and st.session_state.stat_map_generated:
                 st.info("Map parameters have changed. Click Generate Static Map to update the visualization.")
 
-            stat_generate_clicked = st.button("Generate Static Map", disabled=not(uploaded_files and combined_df is not None and not combined_df.empty))
+            stat_generate_clicked = st.button("Generate Static Map", disabled=not(uploaded_files and df_selected_tracks is not None and not df_selected_tracks.empty))
             
             # Always show the map if it was previously generated
             if stat_generate_clicked or st.session_state.stat_map_generated:
@@ -383,12 +353,10 @@ def main():
                 if stat_generate_clicked or st.session_state.stat_map_fig is None:
                     with st.spinner("Generating map..."):
                         fig = generate_map(
-                            combined_df,
+                            df_selected_tracks,
                             mode=vis_mode,
                             map_style=stat_map_style,
                             fig_width=int(stat_fig_width),
-                            lat_padding=stat_lat_padding,
-                            lon_padding=stat_lon_padding,
                             lat_min=stat_lat_min,
                             lat_max=stat_lat_max,
                             lon_min=stat_lon_min,
@@ -432,29 +400,58 @@ def main():
             anim_lon_padding = st.number_input("Longitude Padding", min_value=0.0, max_value=1.0, value=0.125, step=0.005, format="%.3f", key="anim_lon_padding")
 
             # Custom map bounds
-            anim_use_custom_bounds = False
+            anim_lat_min = 0
+            anim_lat_max = 0
+            anim_lon_min = 0
+            anim_lon_max = 0
             with st.expander("Custom Latitude and Longitude Bounds", expanded=False):
-                if uploaded_files and combined_df is not None and not combined_df.empty:
-                    anim_use_custom_bounds = st.checkbox("Use custom Bounds", value=False, key="anim_custom_bounds")
+                
+                if uploaded_files and df_selected_tracks is not None and not df_selected_tracks.empty:
 
-                    anim_track_lat_delta = combined_df["latitude"].max() - combined_df["latitude"].min()
-                    anim_track_lon_delta = combined_df["longitude"].max() - combined_df["longitude"].min()
+                    anim_track_lat_delta = df_selected_tracks["latitude"].max() - df_selected_tracks["latitude"].min()
+                    anim_track_lon_delta = df_selected_tracks["longitude"].max() - df_selected_tracks["longitude"].min()
 
-                    anim_lat_min_default = combined_df["latitude"].min() - anim_lat_padding*anim_track_lat_delta
-                    anim_lat_max_default = combined_df["latitude"].max() + anim_lat_padding*anim_track_lat_delta
-                    anim_lon_min_default = combined_df["longitude"].min() - anim_lon_padding*anim_track_lon_delta
-                    anim_lon_max_default = combined_df["longitude"].max() + anim_lon_padding*anim_track_lon_delta
-                    
-                    if anim_use_custom_bounds:                        
-                        anim_lat_min = st.number_input("Min Latitude", value=anim_lat_min_default, format="%.6f", key="anim_lat_min")
-                        anim_lat_max = st.number_input("Max Latitude", value=anim_lat_max_default, format="%.6f", key="anim_lat_max")
-                        anim_lon_min = st.number_input("Min Longitude", value=anim_lon_min_default, format="%.6f", key="anim_lon_min")                        
-                        anim_lon_max = st.number_input("Max Longitude", value=anim_lon_max_default, format="%.6f", key="anim_lon_max")
-                    else:
+                    anim_lat_min_default = df_selected_tracks["latitude"].min() - anim_lat_padding*anim_track_lat_delta
+                    anim_lat_max_default = df_selected_tracks["latitude"].max() + anim_lat_padding*anim_track_lat_delta
+                    anim_lon_min_default = df_selected_tracks["longitude"].min() - anim_lon_padding*anim_track_lon_delta
+                    anim_lon_max_default = df_selected_tracks["longitude"].max() + anim_lon_padding*anim_track_lon_delta
+
+                    anim_custom_bounds_mode = st.radio(
+                        label="Select custom bounds mode:",
+                        options=["Use standard lat/lon padding", "Use custom NSEW padding", "Use custom latitude and longitude"],
+                        index=0,
+                        key="anim_custom_bounds_mode",
+                        horizontal=True
+                    )
+                    if anim_custom_bounds_mode == "Use standard lat/lon padding":
                         anim_lat_min = anim_lat_min_default
                         anim_lat_max = anim_lat_max_default
                         anim_lon_min = anim_lon_min_default
                         anim_lon_max = anim_lon_max_default
+
+                        st.write(f"Map latitude extents: {anim_lat_min:.4f} to {anim_lat_max:.4f}")
+                        st.write(f"Map longitude extents: {anim_lon_min:.4f} to {anim_lon_max:.4f}")
+
+                    elif anim_custom_bounds_mode == "Use custom NSEW padding":
+                        anim_north_padding = st.number_input("North Padding", min_value=0.0, max_value=1.0, value=anim_lat_padding, step=0.005, format="%.3f", key="anim_north_padding")
+                        anim_south_padding = st.number_input("South Padding", min_value=0.0, max_value=1.0, value=anim_lat_padding, step=0.005, format="%.3f", key="anim_south_padding")
+                        anim_east_padding = st.number_input("East Padding", min_value=0.0, max_value=1.0, value=anim_lon_padding, step=0.005, format="%.3f", key="anim_east_padding")
+                        anim_west_padding = st.number_input("West Padding", min_value=0.0, max_value=1.0, value=anim_lon_padding, step=0.005, format="%.3f", key="anim_west_padding")
+
+                        anim_lat_min = df_selected_tracks["latitude"].min() - anim_south_padding*anim_track_lat_delta
+                        anim_lat_max = df_selected_tracks["latitude"].max() + anim_north_padding*anim_track_lat_delta
+                        anim_lon_min = df_selected_tracks["longitude"].min() - anim_west_padding*anim_track_lon_delta
+                        anim_lon_max = df_selected_tracks["longitude"].max() + anim_east_padding*anim_track_lon_delta
+
+                        st.write(f"Map latitude extents: {anim_lat_min:.4f} to {anim_lat_max:.4f}")
+                        st.write(f"Map longitude extents: {anim_lon_min:.4f} to {anim_lon_max:.4f}")
+                    elif anim_custom_bounds_mode == "Use custom latitude and longitude":                        
+                        anim_lat_min = st.number_input("Min Latitude", value=anim_lat_min_default, format="%.4f", step=0.005, key="anim_lat_min")
+                        anim_lat_max = st.number_input("Max Latitude", value=anim_lat_max_default, format="%.4f", step=0.005, key="anim_lat_max")
+                        anim_lon_min = st.number_input("Min Longitude", value=anim_lon_min_default, format="%.4f", step=0.005, key="anim_lon_min")                        
+                        anim_lon_max = st.number_input("Max Longitude", value=anim_lon_max_default, format="%.4f", step=0.005, key="anim_lon_max")
+                else:
+                    st.write("No data available for custom bounds selection. Upload GPX files and select one or more tracks.")
 
         with anim_col_02:
             st.subheader("Data Settings")
@@ -463,34 +460,29 @@ def main():
             anim_show_legend = st.checkbox("Show legend", value=False, key="anim_show_legend")            
             anim_show_start_end_points = st.checkbox("Show start and end points", value=False, key="anim_show_start_end")
             anim_show_coordinates = st.checkbox("Show coordinates", value=False, key="anim_show_coordinates")
-            anim_line_width = st.slider("Line Width", min_value=1, max_value=4, value=2, step=1, key="anim_line_width")
-            anim_marker_size = st.slider("Marker Size", min_value=1, max_value=8, value=4, step=1, key="anim_marker_size")
+            anim_line_width = st.slider("Line Width", min_value=1, max_value=6, value=3, step=1, key="anim_line_width")
+            anim_marker_size = st.slider("Marker Size", min_value=2, max_value=12, value=6, step=1, key="anim_marker_size")
 
             anim_start_seconds = 0
             anim_end_seconds = 24 * 3600
-
             with st.expander("Custom Time Range", expanded=False):
                 
-                if uploaded_files and combined_df is not None and not combined_df.empty:
+                if uploaded_files and df_selected_tracks is not None and not df_selected_tracks.empty:
 
-                    anim_num_days = np.floor(combined_df["elapsed_seconds"].max() / (24*3600)) + 1
+                    anim_num_days = np.ceil(df_selected_tracks["elapsed_seconds"].max() / (24*3600))
                     anim_num_days = int(max(anim_num_days, 1))
 
-                    anim_start_seconds = 0
-                    anim_end_seconds = anim_num_days * 24 * 3600
+                    anim_data_time_min_hour = int(np.floor(df_selected_tracks["elapsed_seconds"].min() / 3600))
+                    anim_data_time_min_minute = int(np.floor((df_selected_tracks["elapsed_seconds"].min() % 3600) / 60))
 
-                    data_time_min_hour = int(np.floor(combined_df["elapsed_seconds"].min() / 3600))
-                    data_time_min_minute = int(np.floor((combined_df["elapsed_seconds"].min() % 3600) / 60))
+                    anim_data_time_max_hour = int(np.floor(df_selected_tracks["elapsed_seconds"].max() / 3600 - 24*(anim_num_days-1)))
+                    anim_data_time_max_minute = int(np.floor((df_selected_tracks["elapsed_seconds"].max() % 3600) / 60))
 
-                    data_time_max_hour = int(np.ceil(combined_df["elapsed_seconds"].max() / 3600 - 24*(anim_num_days-1)))
-                    data_time_max_minute = int(np.ceil((combined_df["elapsed_seconds"].max() % 3600) / 60))
+                    st.write(f"Data time range: Day {1} at {anim_data_time_min_hour:02d}:{anim_data_time_min_minute:02d}  -  Day {anim_num_days} at {anim_data_time_max_hour:02d}:{anim_data_time_max_minute:02d}")
 
-
-                    st.write(f"Data time range: Day {1} at {data_time_min_hour}:{data_time_min_minute}  -  Day {anim_num_days} at {data_time_max_hour}:{data_time_max_minute}")
-
-                    anim_min_time = combined_df["elapsed_seconds"].min()
+                    anim_min_time = df_selected_tracks["elapsed_seconds"].min()
                     anim_min_time_rounded = anim_min_time - (anim_min_time % (30*60))
-                    anim_max_time = combined_df["elapsed_seconds"].max()
+                    anim_max_time = df_selected_tracks["elapsed_seconds"].max()
                     anim_max_time_rounded = anim_max_time - (anim_max_time % (30*60)) + 30*60
 
                     anim_time_options = []
@@ -501,27 +493,31 @@ def main():
                             anim_time_options.append(f"{hour:02d}:{minute:02d}")
 
                     # Default to nearest 30-minute intervals
-                    anim_default_start_idx = int(2*np.floor(anim_min_time_rounded / (30*60)))
-                    anim_default_end_idx = int(2*np.ceil(anim_max_time_rounded / (30*60)))
+                    anim_time_slider_default_start_idx = int(2*np.floor(anim_min_time_rounded / (30*60)))
+                    anim_time_slider_default_end_idx = int(2*np.ceil(anim_max_time_rounded / (30*60)))
+                    st.write(len(anim_time_options))
+                    st.write(anim_time_slider_default_end_idx)
 
 
                     # Create a range slider using the select_slider
-                    anim_selected_range = st.select_slider(
+                    anim_time_slider_selected_range = st.select_slider(
                         "Time range",
                         options=anim_time_options,
-                        value=(anim_time_options[anim_default_start_idx], anim_time_options[anim_default_end_idx]),
-                        key="anim_time_range"
+                        value=(anim_time_options[anim_time_slider_default_start_idx], anim_time_options[anim_time_slider_default_end_idx]),
+                        key="anim_time_slider_range"
                     )
 
-                    anim_start_time, anim_end_time = anim_selected_range
+                    anim_start_time_selected, anim_end_time_selected = anim_time_slider_selected_range
 
-                    anim_start_hour, anim_start_minute = map(int, anim_start_time.split(":"))
-                    anim_end_hour, anim_end_minute = map(int, anim_end_time.split(":"))
+                    anim_start_hour, anim_start_minute = map(int, anim_start_time_selected.split(":"))
+                    anim_end_hour, anim_end_minute = map(int, anim_end_time_selected.split(":"))
 
                     anim_start_seconds = 3600 * anim_start_hour + 60 * anim_start_minute
                     anim_end_seconds = 3600 * anim_end_hour + 60 * anim_end_minute
 
                     st.write(anim_start_seconds, anim_end_seconds)
+                else:
+                    st.write("No data available for custom time range selection. Upload GPX files and select one or more tracks.")
         
         with anim_col_03:
             st.subheader("Animation Settings")
@@ -547,24 +543,23 @@ def main():
             anim_params = {
                 "map_style": anim_map_style,
                 "fig_width": anim_fig_width,
-                "duration": anim_duration,
-                "fps": anim_fps,
-                "marker_size": anim_marker_size,
-                "line_width": anim_line_width,
-                "lat_padding": anim_lat_padding,
-                "lon_padding": anim_lon_padding,
-                "title": anim_title,
+                "lat_min": anim_lat_min,
+                "lat_max": anim_lat_max,
+                "lon_min": anim_lon_min,
+                "lon_max": anim_lon_max,
                 "show_time": anim_show_time,
                 "show_legend": anim_show_legend,
-                "trail_duration": anim_trail_duration,
-                "use_custom_bounds": anim_use_custom_bounds,
-                "lat_min": anim_lat_min if anim_use_custom_bounds else None,
-                "lat_max": anim_lat_max if anim_use_custom_bounds else None,
-                "lon_min": anim_lon_min if anim_use_custom_bounds else None,
-                "lon_max": anim_lon_max if anim_use_custom_bounds else None,
+                "show_start_end_points": anim_show_start_end_points,
+                "show_coordinates": anim_show_coordinates,
+                "marker_size": anim_marker_size,
+                "line_width": anim_line_width,
                 "start_time": anim_start_seconds,
                 "end_time": anim_end_seconds,
-                "dpi": anim_dpi
+                "length": anim_duration,
+                "fps": anim_fps,
+                "trail_duration": anim_trail_duration,
+                "dpi": anim_dpi,
+                "title": anim_title,
             }
             
             # Generate a hash of these parameters
@@ -578,10 +573,10 @@ def main():
             if anim_params_changed and st.session_state.animation_generated:
                 st.info("Animation parameters have changed. Click Generate Animation to update the visualization.")
 
-            # if uploaded_files and combined_df is not None and not combined_df.empty:
+            # if uploaded_files and df_combined is not None and not df_combined.empty:
             
             # Generate animation button
-            anim_gen_clicked = st.button("Generate Animation", disabled=not(uploaded_files and combined_df is not None and not combined_df.empty))
+            anim_gen_clicked = st.button("Generate Animation", disabled=not(uploaded_files and df_selected_tracks is not None and not df_selected_tracks.empty))
             
             # Display the animation if button clicked or if it was previously generated
             if anim_gen_clicked or st.session_state.animation_generated:
@@ -593,27 +588,30 @@ def main():
                     with st.spinner("Generating animation... This may take a while depending on duration and quality settings."):
                         try:
                             animation_file = generate_animation(
-                                combined_df,
-                                duration=anim_duration,
-                                fps=anim_fps,
-                                start_time=anim_start_seconds,
-                                end_time=anim_end_seconds,
-                                dpi=anim_dpi,
-                                trail_duration=anim_trail_duration,
-                                marker_size=anim_marker_size,
-                                line_width=anim_line_width,
-                                add_terrain=True,
+                                df_selected_tracks,
+                                mode=vis_mode,
                                 map_style=anim_map_style,
                                 fig_width=int(anim_fig_width),
-                                lat_padding=anim_lat_padding,
-                                lon_padding=anim_lon_padding,
                                 lat_min=anim_lat_min,
                                 lat_max=anim_lat_max,
                                 lon_min=anim_lon_min,
                                 lon_max=anim_lon_max,
-                                title=anim_title,
+                                
                                 show_time=anim_show_time,
-                                show_legend=anim_show_legend
+                                show_legend=anim_show_legend,
+                                show_coordinates=anim_show_coordinates,
+                                line_width=anim_line_width,
+                                marker_size=anim_marker_size,
+                                start_time=anim_start_seconds,
+                                end_time=anim_end_seconds,
+
+                                duration=anim_duration,
+                                fps=anim_fps,
+                                trail_duration=anim_trail_duration,
+                                dpi=anim_dpi,
+
+
+                                title=anim_title,
                             )
                             
                             # Store the animation file path and load the bytes
@@ -652,3 +650,48 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+# Visualization mode selection
+        # st.subheader("Visualization Mode")
+        # vis_mode = st.radio(
+        #     label="Select Visualization Mode",
+        #     index=0,
+        #     options=["Visualize files", "Visualize tracks"],
+        #     key="visualization_mode",
+        #     captions=[
+        #         "Combine all tracks within each file into a single track. Select if you export one trip per file. If an trip is split into multiple tracks, they will be combined into a single track.",
+        #         "Keep each track in GPX files separate. Select if you export multiple trips per file. If a trip is split into multiple tracks, they will be NOT combined into a single track, and be treated as multiple trips."
+        #     ]
+        # )
+        # vis_mode = "file" if vis_mode == "Visualize files" else "track"
+
+        # # Create an expandable container for the file/track information
+        # if uploaded_files and df_combined is not None and not df_combined.empty:        
+        #     with st.expander("File and Track Information", expanded=False):
+        #         if vis_mode == "file":
+        #             file_info = ""
+        #             for file_name in sorted(df_combined["file_name"].unique()):
+        #                 file_info += f"File {file_name}.gpx combined into a track of {len(df_combined[df_combined["file_name"] == file_name])} points\n"
+
+        #             st.text_area("", file_info, height=200, disabled=True)
+                
+        #         elif vis_mode == "track":
+        #             track_info = ""
+        #             for file_name in sorted(df_combined["file_name"].unique()):
+        #                 track_info += f"File: {file_name}\n"
+        #                 for track_name in sorted(df_combined[(df_combined["file_name"] == file_name)]["track_name"].unique()):
+        #                     # Filter by both file_name AND track_name
+        #                     track_points = df_combined[(df_combined["file_name"] == file_name) & 
+        #                                             (df_combined["track_name"] == track_name)]
+                            
+        #                     # Format the times to be more readable (optional)
+        #                     min_seconds = track_points["elapsed_seconds"].min()
+        #                     max_seconds = track_points["elapsed_seconds"].max()
+                            
+        #                     track_info += f"  - {track_name} - {len(track_points)} points - {min_seconds:.1f}s to {max_seconds:.1f}s\n"
+        #                 track_info += "\n"
+                    
+        #             # Display in a text area which is scrollable by default
+        #             st.text_area("", track_info, height=200, disabled=True)
