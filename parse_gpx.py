@@ -6,6 +6,40 @@ import pandas as pd
 import streamlit as st
 import tempfile
 
+# Function to convert timestamps in a DataFrame column to a specified timezone
+def convert_timestamp_timezone(df, column_name, target_tz="US/Pacific", file_name=None):
+    """
+    Convert timestamps in a DataFrame column to the target timezone.
+    
+    Args:
+        df (pd.DataFrame): DataFrame containing the timestamp column
+        column_name (str): Name of the column containing timestamps
+        target_tz (str): Target timezone to convert to
+        file_name (str, optional): Name of the file for warning messages
+        
+    Returns:
+        pd.DataFrame: DataFrame with converted timestamps
+    """
+    original_df = df.copy()
+    
+    # Check if timestamps already have timezone info
+    sample_timestamp = df[column_name].iloc[0] if not df.empty else None
+    has_tzinfo = sample_timestamp is not None and sample_timestamp.tzinfo is not None
+    
+    try:
+        if has_tzinfo:
+            # Timestamps already have timezone info, just convert
+            df[column_name] = df[column_name].dt.tz_convert(target_tz)
+        else:
+            # Timestamps don't have timezone, assume UTC and convert
+            df[column_name] = df[column_name].dt.tz_localize("UTC").dt.tz_convert(target_tz)
+        return df
+    except Exception as e:
+        # If conversion fails, issue a warning and return original data
+        if file_name:
+            st.warning(f"Could not convert timestamps for {file_name}: {str(e)}. Using as is.")
+        return original_df
+
 # Load GPX files into a DataFrame
 def parse_gpx_files(uploaded_files) -> pd.DataFrame | None:
 
@@ -47,15 +81,9 @@ def parse_gpx_files(uploaded_files) -> pd.DataFrame | None:
                 if track_points:  # Only process if there are points
                     df = pd.DataFrame(track_points, columns=["file_name", "track_name", "timestamp", "latitude", "longitude", "elevation"])
                     df["timestamp"] = pd.to_datetime(df["timestamp"])
-                    
-                    # Handle timezone conversion safely
-                    try:
-                        df["timestamp"] = df["timestamp"].dt.tz_convert("US/Pacific")
-                    except:
-                        try:
-                            df["timestamp"] = df["timestamp"].dt.tz_localize("UTC").dt.tz_convert("US/Pacific")
-                        except:
-                            st.warning(f"Could not convert timestamps for {uploaded_file.name}. Using as is.")
+
+                    df = convert_timestamp_timezone(df, "timestamp", file_name=uploaded_file.name)
+
 
                     min_track_timestamp = df["timestamp"].min()
 
