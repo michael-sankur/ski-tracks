@@ -1,7 +1,7 @@
 import streamlit as st
 from providers import PROVIDERS
 
-from custom_map_bounds import get_custom_map_bounds
+from custom_map_bounds import get_custom_map_bounds, get_default_map_bounds
 from custom_time_range import get_custom_time_range
 from generate_map import generate_map
 
@@ -24,13 +24,11 @@ def show_static_map_options(
         stat_lat_padding = st.number_input("Latitude Padding", min_value=0.0, max_value=1.0, value=default_lat_padding, step=0.005, format="%.3f",key="stat_lat_padding")
         stat_lon_padding = st.number_input("Longitude Padding", min_value=0.0, max_value=1.0, value=default_lon_padding, step=0.005, format="%.3f",key="stat_lon_padding")
         
-        track_lat_delta = df_selected_tracks["latitude"].max() - df_selected_tracks["latitude"].min()
-        track_lon_delta = df_selected_tracks["longitude"].max() - df_selected_tracks["longitude"].min()
-
-        stat_lat_min = df_selected_tracks["latitude"].min() - stat_lat_padding*track_lat_delta
-        stat_lat_max = df_selected_tracks["latitude"].max() + stat_lat_padding*track_lat_delta
-        stat_lon_min = df_selected_tracks["longitude"].min() - stat_lon_padding*track_lon_delta
-        stat_lon_max = df_selected_tracks["longitude"].max() + stat_lon_padding*track_lon_delta
+        stat_lat_min, stat_lat_max, stat_lon_min, stat_lon_max = get_default_map_bounds(
+            df_selected_tracks,
+            lat_padding=stat_lat_padding,
+            lon_padding=stat_lon_padding
+        )
         if df_selected_tracks is not None and not df_selected_tracks.empty:
             stat_lat_min, stat_lat_max, stat_lon_min, stat_lon_max = get_custom_map_bounds(
                 df_selected_tracks,
@@ -81,20 +79,20 @@ def show_static_map_options(
         "stat_end_seconds": stat_end_seconds,
     }
 
-def get_map_bounds(df, lat_padding, lon_padding):
-    """Calculate map bounds based on data and padding"""
-    if df is None or df.empty:
-        return 0, 0, 0, 0
+# def get_map_bounds(df, lat_padding, lon_padding):
+#     """Calculate map bounds based on data and padding"""
+#     if df is None or df.empty:
+#         return 0, 0, 0, 0
         
-    track_lat_delta = df["latitude"].max() - df["latitude"].min()
-    track_lon_delta = df["longitude"].max() - df["longitude"].min()
+#     track_lat_delta = df["latitude"].max() - df["latitude"].min()
+#     track_lon_delta = df["longitude"].max() - df["longitude"].min()
 
-    lat_min = df["latitude"].min() - lat_padding * track_lat_delta
-    lat_max = df["latitude"].max() + lat_padding * track_lat_delta
-    lon_min = df["longitude"].min() - lon_padding * track_lon_delta
-    lon_max = df["longitude"].max() + lon_padding * track_lon_delta
+#     lat_min = df["latitude"].min() - lat_padding * track_lat_delta
+#     lat_max = df["latitude"].max() + lat_padding * track_lat_delta
+#     lon_min = df["longitude"].min() - lon_padding * track_lon_delta
+#     lon_max = df["longitude"].max() + lon_padding * track_lon_delta
     
-    return lat_min, lat_max, lon_min, lon_max
+#     return lat_min, lat_max, lon_min, lon_max
 
 # def get_time_range(df):
 #     """Get time range from data"""

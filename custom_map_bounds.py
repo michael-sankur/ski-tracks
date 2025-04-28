@@ -1,6 +1,25 @@
 
 import streamlit as st
 
+def get_default_map_bounds(
+    df_selected_tracks,
+    lat_padding=0.125,
+    lon_padding=0.125
+):
+    """Calculate default map bounds based on selected tracks and padding."""
+    if df_selected_tracks is None or df_selected_tracks.empty:
+        return 0, 0, 0, 0
+
+    track_lat_delta = df_selected_tracks["latitude"].max() - df_selected_tracks["latitude"].min()
+    track_lon_delta = df_selected_tracks["longitude"].max() - df_selected_tracks["longitude"].min()
+
+    lat_min = df_selected_tracks["latitude"].min() - lat_padding * track_lat_delta
+    lat_max = df_selected_tracks["latitude"].max() + lat_padding * track_lat_delta
+    lon_min = df_selected_tracks["longitude"].min() - lon_padding * track_lon_delta
+    lon_max = df_selected_tracks["longitude"].max() + lon_padding * track_lon_delta
+
+    return lat_min, lat_max, lon_min, lon_max
+
 def get_custom_map_bounds(
     df_selected_tracks,
     prefix:str,

@@ -6,7 +6,7 @@ from generate_animation import generate_animation
 import numpy as np
 import pandas as pd
 
-from custom_map_bounds import get_custom_map_bounds
+from custom_map_bounds import get_custom_map_bounds, get_default_map_bounds
 from custom_time_range import get_custom_time_range
 from util import get_params_hash
 
@@ -36,13 +36,11 @@ def show_animation_options(
         anim_lat_padding = st.number_input("Latitude Padding", min_value=0.0, max_value=1.0, value=0.125, step=0.005, format="%.3f",key="anim_lat_padding")
         anim_lon_padding = st.number_input("Longitude Padding", min_value=0.0, max_value=1.0, value=0.125, step=0.005, format="%.3f", key="anim_lon_padding")
 
-        track_lat_delta = df_selected_tracks["latitude"].max() - df_selected_tracks["latitude"].min()
-        track_lon_delta = df_selected_tracks["longitude"].max() - df_selected_tracks["longitude"].min()
-
-        anim_lat_min = df_selected_tracks["latitude"].min() - anim_lat_padding*track_lat_delta
-        anim_lat_max = df_selected_tracks["latitude"].max() + anim_lat_padding*track_lat_delta
-        anim_lon_min = df_selected_tracks["longitude"].min() - anim_lon_padding*track_lon_delta
-        anim_lon_max = df_selected_tracks["longitude"].max() + anim_lon_padding*track_lon_delta
+        anim_lat_min, anim_lat_max, anim_lon_min, anim_lon_max = get_default_map_bounds(
+            df_selected_tracks,
+            lat_padding=anim_lat_padding,
+            lon_padding=anim_lon_padding
+        )
         if df_selected_tracks is not None and not df_selected_tracks.empty:
             anim_lat_min, anim_lat_max, anim_lon_min, anim_lon_max = get_custom_map_bounds(
                 df_selected_tracks,
