@@ -37,17 +37,13 @@ import pandas as pd
 import os
 import streamlit as st
 
+from animation import show_animation_options, generate_display_animation
 from parse_gpx import parse_gpx_files
 from providers import PROVIDERS
-from generate_map import generate_map
-from generate_animation import generate_animation
-
-from parse_gpx import parse_gpx_files
 from state_management import initialize_session_state, on_files_uploaded
+from static_map import show_static_map_options, generate_display_static_map
 from track_selection import show_track_selection
-from static_map_section import show_static_map_options, generate_display_static_map
-from animation_section import show_animation_options, generate_display_animation
-# from animation import show_animation_options, generate_animation_vizualization
+from static_map import show_static_map_options, generate_display_static_map
 from util import check_params_changed, get_binary_file_downloader_html
 
 

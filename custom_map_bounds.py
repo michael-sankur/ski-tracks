@@ -1,11 +1,14 @@
+# Functions to calculate default and custom map bounds
 
+import pandas as pd
 import streamlit as st
+from typing import Tuple
 
 def get_default_map_bounds(
-    df_selected_tracks,
-    lat_padding=0.125,
-    lon_padding=0.125
-):
+    df_selected_tracks:pd.DataFrame,
+    lat_padding:float=0.125,
+    lon_padding:float=0.125
+) -> Tuple[float, float, float, float]:
     """Calculate default map bounds based on selected tracks and padding."""
     if df_selected_tracks is None or df_selected_tracks.empty:
         return 0, 0, 0, 0
@@ -21,11 +24,11 @@ def get_default_map_bounds(
     return lat_min, lat_max, lon_min, lon_max
 
 def get_custom_map_bounds(
-    df_selected_tracks,
-    prefix:str,
-    lat_padding=0.125,
-    lon_padding=0.125
-):
+    df_selected_tracks:pd.DataFrame,
+    prefix:str="",
+    lat_padding:float=0.125,
+    lon_padding:float=0.125
+) -> Tuple[float, float, float, float]:
 
     # Custom map bounds
     lat_min = 0
