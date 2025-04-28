@@ -51,7 +51,7 @@ def generate_animation(
     elif mode == "file":
         track_names = df["file_name"].unique()
     else:
-        st.error("Invalid mode specified. Use 'track' or 'file'.")
+        st.error("Invalid mode specified.")
         return None
 
     colors = get_distinct_colors(len(track_names))
@@ -101,7 +101,7 @@ def generate_animation(
     
     # Add a timestamp text
     time_text = ax.text(0.02, 0.95, "", transform=ax.transAxes, fontsize=12, 
-                        bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
+                        bbox=dict(facecolor="white", alpha=1.0, edgecolor="none"))
     
     # Create a legend with the track names
     if show_legend and len(track_names) > 1:
@@ -193,7 +193,7 @@ def generate_animation(
     )
     
     # Save the animation to a temporary file and return it
-    temp_file = tempfile.NamedTemporaryFile(suffix='.mp4', delete=False)
+    temp_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
     
     # Save the animation as an MP4 file
     writer = animation.FFMpegWriter(fps=fps, metadata=dict(artist="GPX Visualizer"), bitrate=1800)

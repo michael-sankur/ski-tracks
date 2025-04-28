@@ -145,12 +145,16 @@ def main():
         
         st.divider()
 
-        # Track selection section
-        selected_tracks, df_selected_tracks = show_track_selection(df_combined)
-        
-        vis_mode = "track"  # Could be made configurable
-        
-        st.divider()
+        df_selected_tracks = None
+        if df_combined is not None and not df_combined.empty:
+
+
+            # Track selection section
+            selected_tracks, df_selected_tracks = show_track_selection(df_combined)
+            
+            vis_mode = "track"  # Could be made configurable
+            
+            st.divider()
 
         # Static map section
         if df_selected_tracks is not None and not df_selected_tracks.empty:
@@ -162,7 +166,7 @@ def main():
             generate_display_static_map(df_selected_tracks, stat_params, selected_tracks, session_key_prefix="stat")
             
 
-        st.divider()
+            st.divider()
 
         if df_selected_tracks is not None and not df_selected_tracks.empty:
             anim_params = show_animation_options(df_selected_tracks)
@@ -184,7 +188,7 @@ def main():
             #     st.session_state.anim_params_hash = anim_current_hash
             #     st.session_state.current_anim_params = anim_params
 
-        st.divider()
+            st.divider()
 
 if __name__ == "__main__":
     main()

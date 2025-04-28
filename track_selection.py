@@ -11,7 +11,7 @@ def show_track_selection(df_combined):
         selected_tracks: List of selected track names
         df_selected_tracks: DataFrame filtered to selected tracks
     """
-    st.title("Select Tracks")
+    st.header("Select Tracks")
     
     if df_combined is None or df_combined.empty:
         st.write("No data available. Upload one or more GPX files.")

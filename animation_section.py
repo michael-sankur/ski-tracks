@@ -1,11 +1,13 @@
 import streamlit as st
+import custom_time_range
 from providers import PROVIDERS
 from generate_animation import generate_animation
 
 import numpy as np
 import pandas as pd
-import os
-import tempfile
+
+from custom_map_bounds import get_custom_map_bounds
+from custom_time_range import get_custom_time_range
 from util import get_params_hash
 
 
@@ -34,59 +36,20 @@ def show_animation_options(
         anim_lat_padding = st.number_input("Latitude Padding", min_value=0.0, max_value=1.0, value=0.125, step=0.005, format="%.3f",key="anim_lat_padding")
         anim_lon_padding = st.number_input("Longitude Padding", min_value=0.0, max_value=1.0, value=0.125, step=0.005, format="%.3f", key="anim_lon_padding")
 
-        # Custom map bounds
-        anim_lat_min = 0
-        anim_lat_max = 0
-        anim_lon_min = 0
-        anim_lon_max = 0
-        with st.expander("Custom Latitude and Longitude Bounds", expanded=False):
-            
-            if df_selected_tracks is not None and not df_selected_tracks.empty:
+        track_lat_delta = df_selected_tracks["latitude"].max() - df_selected_tracks["latitude"].min()
+        track_lon_delta = df_selected_tracks["longitude"].max() - df_selected_tracks["longitude"].min()
 
-                anim_track_lat_delta = df_selected_tracks["latitude"].max() - df_selected_tracks["latitude"].min()
-                anim_track_lon_delta = df_selected_tracks["longitude"].max() - df_selected_tracks["longitude"].min()
-
-                anim_lat_min_default = df_selected_tracks["latitude"].min() - anim_lat_padding*anim_track_lat_delta
-                anim_lat_max_default = df_selected_tracks["latitude"].max() + anim_lat_padding*anim_track_lat_delta
-                anim_lon_min_default = df_selected_tracks["longitude"].min() - anim_lon_padding*anim_track_lon_delta
-                anim_lon_max_default = df_selected_tracks["longitude"].max() + anim_lon_padding*anim_track_lon_delta
-
-                anim_custom_bounds_mode = st.radio(
-                    label="Select custom bounds mode:",
-                    options=["Use standard lat/lon padding", "Use custom NSEW padding", "Use custom latitude and longitude"],
-                    index=0,
-                    key="anim_custom_bounds_mode",
-                    horizontal=True
-                )
-                if anim_custom_bounds_mode == "Use standard lat/lon padding":
-                    anim_lat_min = anim_lat_min_default
-                    anim_lat_max = anim_lat_max_default
-                    anim_lon_min = anim_lon_min_default
-                    anim_lon_max = anim_lon_max_default
-
-                    st.write(f"Map latitude extents: {anim_lat_min:.4f} to {anim_lat_max:.4f}")
-                    st.write(f"Map longitude extents: {anim_lon_min:.4f} to {anim_lon_max:.4f}")
-
-                elif anim_custom_bounds_mode == "Use custom NSEW padding":
-                    anim_north_padding = st.number_input("North Padding", min_value=0.0, max_value=1.0, value=anim_lat_padding, step=0.005, format="%.3f", key="anim_north_padding")
-                    anim_south_padding = st.number_input("South Padding", min_value=0.0, max_value=1.0, value=anim_lat_padding, step=0.005, format="%.3f", key="anim_south_padding")
-                    anim_east_padding = st.number_input("East Padding", min_value=0.0, max_value=1.0, value=anim_lon_padding, step=0.005, format="%.3f", key="anim_east_padding")
-                    anim_west_padding = st.number_input("West Padding", min_value=0.0, max_value=1.0, value=anim_lon_padding, step=0.005, format="%.3f", key="anim_west_padding")
-
-                    anim_lat_min = df_selected_tracks["latitude"].min() - anim_south_padding*anim_track_lat_delta
-                    anim_lat_max = df_selected_tracks["latitude"].max() + anim_north_padding*anim_track_lat_delta
-                    anim_lon_min = df_selected_tracks["longitude"].min() - anim_west_padding*anim_track_lon_delta
-                    anim_lon_max = df_selected_tracks["longitude"].max() + anim_east_padding*anim_track_lon_delta
-
-                    st.write(f"Map latitude extents: {anim_lat_min:.4f} to {anim_lat_max:.4f}")
-                    st.write(f"Map longitude extents: {anim_lon_min:.4f} to {anim_lon_max:.4f}")
-                elif anim_custom_bounds_mode == "Use custom latitude and longitude":                        
-                    anim_lat_min = st.number_input("Min Latitude", value=anim_lat_min_default, format="%.4f", step=0.005, key="anim_lat_min")
-                    anim_lat_max = st.number_input("Max Latitude", value=anim_lat_max_default, format="%.4f", step=0.005, key="anim_lat_max")
-                    anim_lon_min = st.number_input("Min Longitude", value=anim_lon_min_default, format="%.4f", step=0.005, key="anim_lon_min")                        
-                    anim_lon_max = st.number_input("Max Longitude", value=anim_lon_max_default, format="%.4f", step=0.005, key="anim_lon_max")
-            else:
-                st.write("No data available for custom bounds selection. Upload GPX files and select one or more tracks.")
+        anim_lat_min = df_selected_tracks["latitude"].min() - anim_lat_padding*track_lat_delta
+        anim_lat_max = df_selected_tracks["latitude"].max() + anim_lat_padding*track_lat_delta
+        anim_lon_min = df_selected_tracks["longitude"].min() - anim_lon_padding*track_lon_delta
+        anim_lon_max = df_selected_tracks["longitude"].max() + anim_lon_padding*track_lon_delta
+        if df_selected_tracks is not None and not df_selected_tracks.empty:
+            anim_lat_min, anim_lat_max, anim_lon_min, anim_lon_max = get_custom_map_bounds(
+                df_selected_tracks,
+                prefix="anim",
+                lat_padding=anim_lat_padding,
+                lon_padding=anim_lon_padding
+            )
 
     with anim_col_02:
         st.subheader("Data Settings")
@@ -101,65 +64,20 @@ def show_animation_options(
 
         anim_start_seconds = 0
         anim_end_seconds = 24 * 3600
-        with st.expander("Custom Time Range", expanded=False):
-            
-            if df_selected_tracks is not None and not df_selected_tracks.empty:
-
-                anim_num_days = np.ceil(df_selected_tracks["elapsed_seconds"].max() / (24*3600))
-                anim_num_days = int(max(anim_num_days, 1))
-
-                anim_data_time_min_hour = int(np.floor(df_selected_tracks["elapsed_seconds"].min() / 3600))
-                anim_data_time_min_minute = int(np.floor((df_selected_tracks["elapsed_seconds"].min() % 3600) / 60))
-
-                anim_data_time_max_hour = int(np.floor(df_selected_tracks["elapsed_seconds"].max() / 3600 - 24*(anim_num_days-1)))
-                anim_data_time_max_minute = int(np.floor((df_selected_tracks["elapsed_seconds"].max() % 3600) / 60))
-
-                st.write(f"Data time range: Day {1} at {anim_data_time_min_hour:02d}:{anim_data_time_min_minute:02d}  -  Day {anim_num_days} at {anim_data_time_max_hour:02d}:{anim_data_time_max_minute:02d}")
-
-                anim_min_time = df_selected_tracks["elapsed_seconds"].min()
-                anim_min_time_rounded = anim_min_time - (anim_min_time % (30*60))
-                anim_max_time = df_selected_tracks["elapsed_seconds"].max()
-                anim_max_time_rounded = anim_max_time - (anim_max_time % (30*60)) + 30*60
-
-                anim_time_options = []
-                for hour in range(anim_num_days*24 + 1):
-                    for minute in [0, 15, 30, 45]:
-                        if hour == anim_num_days*24 and minute > 0:
-                            continue
-                        anim_time_options.append(f"{hour:02d}:{minute:02d}")
-
-                # Default to nearest 30-minute intervals
-                anim_time_slider_default_start_idx = min(int(2*np.floor(anim_min_time_rounded / (30*60))), len(anim_time_options)-1)
-                anim_time_slider_default_end_idx = min(int(2*np.ceil(anim_max_time_rounded / (30*60))), len(anim_time_options)-1)
-
-                # Create a range slider using the select_slider
-                anim_time_slider_selected_range = st.select_slider(
-                    "Time range",
-                    options=anim_time_options,
-                    value=(anim_time_options[anim_time_slider_default_start_idx], anim_time_options[anim_time_slider_default_end_idx]),
-                    key="anim_time_slider_range"
-                )
-
-                anim_start_time_selected, anim_end_time_selected = anim_time_slider_selected_range
-
-                anim_start_hour, anim_start_minute = map(int, anim_start_time_selected.split(":"))
-                anim_end_hour, anim_end_minute = map(int, anim_end_time_selected.split(":"))
-
-                anim_start_seconds = 3600 * anim_start_hour + 60 * anim_start_minute
-                anim_end_seconds = 3600 * anim_end_hour + 60 * anim_end_minute
-            else:
-                st.write("No data available for custom time range selection. Upload GPX files and select one or more tracks.")
+        if df_selected_tracks is not None and not df_selected_tracks.empty:
+            anim_start_seconds, anim_end_seconds = get_custom_time_range(df_selected_tracks=df_selected_tracks, prefix="anim")
     
     with anim_col_03:
         st.subheader("Animation Settings")
 
         anim_duration = st.slider("Animation length (seconds)", min_value=10, max_value=60, value=20, step=2, key="anim_duration")
-        anim_fps = st.slider("Frames per second", min_value=10, max_value=48, value=24, step=2, key="anim_fps")            
+        anim_fps = st.slider("Frames per second", min_value=10, max_value=48, value=24, step=2, key="anim_fps")
+        anim_num_days = int(max(np.ceil(df_selected_tracks["elapsed_seconds"].max() / (24*3600)), 1))
         anim_trail_duration = 60*60*st.slider(
             "Trail duration (hours)",
             min_value=0,
-            max_value=24,
-            value=12,
+            max_value=int(anim_num_days*24),
+            value=24,
             step=1,
             key="anim_trail_hours"
         )                    
